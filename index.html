@@ -1,0 +1,1647 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Mango — Cotizador</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='8' fill='%23191919'/><text x='6' y='24' font-size='22' fill='%23FFCE00' font-family='sans-serif' font-style='italic' font-weight='700'>M</text></svg>" />
+  <link href="https://fonts.googleapis.com/css2?family=Open+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.2/html2pdf.bundle.min.js"></script>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { background: #F9F9F9; font-family: 'Open Sans', system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
+    input[type="range"] { -webkit-appearance: none; appearance: none; }
+    input[type="range"]::-webkit-slider-thumb {
+      -webkit-appearance: none; width: 20px; height: 20px; border-radius: 50%;
+      background: #FFCE00; cursor: pointer; border: 2px solid #191919; margin-top: -7px;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.15);
+    }
+    input[type="range"]::-moz-range-thumb {
+      width: 20px; height: 20px; border-radius: 50%;
+      background: #FFCE00; cursor: pointer; border: 2px solid #191919;
+    }
+    .pdf-section { page-break-inside: avoid; break-inside: avoid; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="text/babel">
+    const { useState, useMemo } = React;
+
+    const T = {
+      primary: "#FFCE00", primaryHover: "#FFE166", primaryLight: "#FFF8D6",
+      dark: "#191919", surface: "#FFFFFF", bg: "#F9F9F9",
+      text: "#000000", textSecondary: "#666666", textMuted: "#999999",
+      border: "#E6E6E6", borderInput: "#CCCCCC",
+      green: "#2CC87B", greenLight: "rgba(44,200,123,0.12)",
+      orange: "#FF6B35", orangeLight: "rgba(255,107,53,0.12)",
+      red: "#B71414", redBg: "#FBE3E3",
+      blue: "#3B82F6", blueLight: "rgba(59,130,246,0.1)",
+      purple: "#7C4DFF", purpleLight: "rgba(124,77,255,0.1)",
+      radiusCard: 16, radiusButton: 8, radiusBadge: 80,
+    };
+
+    const seatTiers = {
+      basico: {
+        id: "basico", label: "Basico", role: "Operativos", price: 1200,
+        color: T.textSecondary, colorBg: "#F5F5F5",
+        features: ["Dashboard de conciliacion", "Vista de facturas y pagos", "Registro manual de pagos", "Exportacion Excel", "Conciliacion asistida (confirmar match)"],
+        almaAccess: "Sin ALMA",
+      },
+      pro: {
+        id: "pro", label: "Pro", role: "Gerencia", price: 2500,
+        color: T.blue, colorBg: T.blueLight,
+        features: ["Todo lo de Basico", "Reportes de aging y concentracion", "Alertas de deterioro de cartera", "Vista multi-sucursal (sus sucursales)", "ALMA chat (creditos compartidos)", "Ghost Extension (capturas)", "Conciliacion inteligente completa"],
+        almaAccess: "ALMA Chat",
+      },
+      business: {
+        id: "business", label: "Business", role: "Direccion", price: 4500,
+        color: T.primary, colorBg: T.primaryLight,
+        features: ["Todo lo de Pro", "Dashboard ejecutivo global", "Vista consolidada todas las sucursales", "Analisis predictivo y tendencias", "ALMA sin limite de creditos", "Ghost Extension + screen recording", "Reportes programados (lunes/viernes)", "API access (webhooks de senales)", "Exportacion avanzada + BI connect"],
+        almaAccess: "ALMA Ilimitado",
+      },
+    };
+
+    const txnTiers = [
+      { min: 0, max: 300, price: 12 },
+      { min: 301, max: 700, price: 10 },
+      { min: 701, max: 1500, price: 8.50 },
+      { min: 1501, max: 3000, price: 7 },
+      { min: 3001, max: 5000, price: 6 },
+      { min: 5001, max: 99999, price: 6 },
+    ];
+
+    const almaPacks = [
+      { id: "starter", queries: 200, price: 2000, label: "Starter",
+        examples: [
+          "\"¿Cuanto me debe Constructora Perez?\"",
+          "\"¿Que facturas vencen esta semana?\"",
+          "\"Dame el resumen del dia\"",
+        ],
+        desc: "Consultas basicas de cartera y estatus de pagos",
+      },
+      { id: "profesional", queries: 600, price: 5000, label: "Profesional",
+        examples: [
+          "Todo lo de Starter, mas:",
+          "\"¿Cuales clientes tienen mas de 30 dias sin pagar?\"",
+          "\"Comparame la cobranza de enero vs febrero\"",
+          "\"¿Quien es mi cliente con mayor riesgo?\"",
+          "\"Genera un reporte de aging por sucursal\"",
+        ],
+        desc: "Analisis de tendencias, comparativos y alertas proactivas",
+      },
+      { id: "business", queries: 1500, price: 10000, label: "Business",
+        examples: [
+          "Todo lo de Profesional, mas:",
+          "\"Proyecta mi flujo de cobros para los proximos 3 meses\"",
+          "\"¿Que clientes deberia dejar de surtir?\"",
+          "\"Analiza el patron de pago de Grupo Constructor Norte\"",
+          "\"Dame insights para mi junta de directores\"",
+          "\"Conecta con mi BI via API y manda reportes los lunes\"",
+        ],
+        desc: "Predicciones, recomendaciones estrategicas, API y reportes automaticos",
+      },
+    ];
+
+    const proteccionTiers = [
+      { min: 0, max: 5, rate: 2.0, label: "0-5M" },
+      { min: 5, max: 10, rate: 1.9, label: "5-10M" },
+      { min: 10, max: 20, rate: 1.8, label: "10-20M" },
+      { min: 20, max: 35, rate: 1.7, label: "20-35M" },
+      { min: 35, max: 50, rate: 1.6, label: "35-50M" },
+      { min: 50, max: 9999, rate: 1.5, label: "50M+" },
+    ];
+
+    function getProteccionRate(montoMillones) {
+      const t = proteccionTiers.find(t => montoMillones >= t.min && montoMillones < t.max);
+      return t || proteccionTiers[proteccionTiers.length - 1];
+    }
+
+    function getTxnPrice(vol) {
+      const t = txnTiers.find(t => vol >= t.min && vol <= t.max);
+      return t ? t.price : 6;
+    }
+    function fmt(n) { return new Intl.NumberFormat("es-MX", { style: "currency", currency: "MXN", minimumFractionDigits: 0, maximumFractionDigits: 0 }).format(n); }
+    function fmtPct(n) { return `${n.toFixed(1)}%`; }
+
+    // --- Components ---
+    function Slider({ label, value, onChange, min, max, step = 1, suffix = "", formatVal }) {
+      const pct = ((value - min) / (max - min)) * 100;
+      return (
+        <div style={{ marginBottom: 20 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
+            <span style={{ color: T.textSecondary, fontSize: 13, fontWeight: 500 }}>{label}</span>
+            <span style={{ color: T.dark, fontSize: 14, fontWeight: 700 }}>{formatVal ? formatVal(value) : value}{suffix}</span>
+          </div>
+          <input type="range" min={min} max={max} step={step} value={value}
+            onChange={e => onChange(Number(e.target.value))}
+            style={{ width: "100%", height: 6, appearance: "none",
+              background: `linear-gradient(to right, ${T.primary} 0%, ${T.primary} ${pct}%, ${T.border} ${pct}%, ${T.border} 100%)`,
+              borderRadius: 3, outline: "none", cursor: "pointer" }} />
+        </div>
+      );
+    }
+
+    function Card({ children, style = {} }) {
+      return <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: T.radiusCard, padding: 24, marginBottom: 16, ...style }}>{children}</div>;
+    }
+
+    function SectionTitle({ children, style = {} }) {
+      return <div style={{ fontSize: 11, fontWeight: 700, color: T.textMuted, letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 14, ...style }}>{children}</div>;
+    }
+
+    function Badge({ children, color, bg }) {
+      return <span style={{ display: "inline-block", padding: "3px 12px", borderRadius: T.radiusBadge, fontSize: 11, fontWeight: 700, background: bg, color }}>{children}</span>;
+    }
+
+    function Toggle({ enabled, onChange, color = T.green }) {
+      return (
+        <div onClick={() => onChange(!enabled)} style={{ width: 36, height: 20, borderRadius: 10, background: enabled ? color : T.border, position: "relative", transition: "all 0.2s", cursor: "pointer", flexShrink: 0 }}>
+          <div style={{ width: 16, height: 16, borderRadius: 8, background: "white", position: "absolute", top: 2, left: enabled ? 18 : 2, transition: "all 0.2s" }} />
+        </div>
+      );
+    }
+
+    // Lucide-style inline SVG icons (16x16)
+    const Icons = {
+      shield: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>,
+      receipt: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 2v20l2-1 2 1 2-1 2 1 2-1 2 1 2-1 2 1V2l-2 1-2-1-2 1-2-1-2 1-2-1-2 1Z"/><path d="M16 8h-6a2 2 0 1 0 0 4h4a2 2 0 1 1 0 4H8"/><path d="M12 17.5v-11"/></svg>,
+      monitor: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="20" height="14" x="2" y="3" rx="2"/><line x1="8" x2="16" y1="21" y2="21"/><line x1="12" x2="12" y1="17" y2="21"/></svg>,
+      sparkles: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z"/></svg>,
+      handshake: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m11 17 2 2a1 1 0 1 0 3-3"/><path d="m14 14 2.5 2.5a1 1 0 1 0 3-3l-3.88-3.88a3 3 0 0 0-4.24 0l-.88.88a1 1 0 1 1-3-3l2.81-2.81a5.79 5.79 0 0 1 7.06-.87l.47.28a2 2 0 0 0 1.42.25L21 4"/><path d="m21 3 1 11h-2"/><path d="M3 3 2 14l6.5 6.5a1 1 0 1 0 3-3"/><path d="M3 4h8"/></svg>,
+    };
+
+    // Product brief — portal FindingBadge pattern
+    function ProductBrief({ icon, color, colorBg, problem, solution, benefits }) {
+      return (
+        <div style={{ padding: "14px 16px", background: `${colorBg}`, border: `1px solid ${color}15`, borderRadius: 10, marginBottom: 16 }}>
+          <div style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
+            <div style={{ width: 32, height: 32, borderRadius: 8, background: `${color}18`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, color }}>
+              {icon}
+            </div>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: 12, fontWeight: 700, color: T.dark, marginBottom: 4 }}>{problem}</div>
+              <div style={{ fontSize: 11, color: T.textSecondary, lineHeight: 1.5, marginBottom: 8 }}>{solution}</div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+                {benefits.map((b, i) => (
+                  <span key={i} style={{ fontSize: 10, padding: "2px 8px", borderRadius: 80, background: `${color}12`, color, fontWeight: 600 }}>{b}</span>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // Product card wrapper — greyed out + collapsed when off
+    function ProductCard({ title, badge, badgeColor, badgeBg, enabled, onChange, toggleColor, accentBorder, children }) {
+      const borderStyle = enabled && accentBorder
+        ? { border: `2px solid ${accentBorder}`, boxShadow: `0 0 0 1px ${accentBorder}22` }
+        : {};
+      return (
+        <Card style={{ opacity: enabled ? 1 : 0.5, transition: "all 0.25s", ...borderStyle }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: enabled ? 14 : 0 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <SectionTitle style={{ marginBottom: 0 }}>{title}</SectionTitle>
+              {badge && <Badge color={badgeColor || T.dark} bg={badgeBg || T.border}>{badge}</Badge>}
+            </div>
+            <Toggle enabled={enabled} onChange={onChange} color={toggleColor || T.green} />
+          </div>
+          {enabled && children}
+        </Card>
+      );
+    }
+
+    function SeatCounter({ tier, count, onChange }) {
+      const info = seatTiers[tier];
+      return (
+        <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "14px 16px", background: count > 0 ? info.colorBg : T.bg, border: `1px solid ${count > 0 ? info.color + "44" : T.border}`, borderRadius: T.radiusButton, marginBottom: 8, transition: "all 0.2s" }}>
+          <div style={{ flex: 1 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <span style={{ fontSize: 14, fontWeight: 700, color: T.text }}>{info.label}</span>
+              <Badge color={info.color === T.textSecondary ? T.textSecondary : info.color} bg={info.colorBg}>{info.role}</Badge>
+            </div>
+            <div style={{ fontSize: 12, color: T.textMuted, marginTop: 2 }}>{fmt(info.price)}/usuario/mes · {info.almaAccess}</div>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <button onClick={() => onChange(Math.max(0, count - 1))} style={{ width: 28, height: 28, borderRadius: 6, border: `1px solid ${T.border}`, background: T.surface, cursor: "pointer", fontSize: 16, fontWeight: 700, color: T.textSecondary, display: "flex", alignItems: "center", justifyContent: "center" }}>-</button>
+            <span style={{ width: 32, textAlign: "center", fontSize: 16, fontWeight: 800, color: T.dark }}>{count}</span>
+            <button onClick={() => onChange(count + 1)} style={{ width: 28, height: 28, borderRadius: 6, border: `1px solid ${T.primary}`, background: T.primaryLight, cursor: "pointer", fontSize: 16, fontWeight: 700, color: T.dark, display: "flex", alignItems: "center", justifyContent: "center" }}>+</button>
+          </div>
+        </div>
+      );
+    }
+
+    function BreakdownRow({ label, amount, pct, color, sub }) {
+      return (
+        <div style={{ padding: "8px 0", borderBottom: `1px solid ${T.border}` }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <div style={{ width: 8, height: 8, borderRadius: 2, background: color, flexShrink: 0 }} />
+            <span style={{ color: T.text, fontSize: 13, flex: 1 }}>{label}</span>
+            {pct > 0 && <span style={{ color: T.textMuted, fontSize: 12 }}>{fmtPct(pct)}</span>}
+            <span style={{ color: T.text, fontSize: 13, fontWeight: 700, minWidth: 100, textAlign: "right" }}>{fmt(amount)}</span>
+          </div>
+          {sub && <div style={{ fontSize: 11, color: T.textMuted, marginLeft: 16, marginTop: 2 }}>{sub}</div>}
+        </div>
+      );
+    }
+
+    // --- Main App ---
+    function PricingModel() {
+      // Product toggles
+      const [proteccionEnabled, setProteccionEnabled] = useState(true);
+      const [conciliacionEnabled, setConciliacionEnabled] = useState(true);
+      const [plataformaEnabled, setPlataformaEnabled] = useState(true);
+      const [almaEnabled, setAlmaEnabled] = useState(true);
+      const [cobranzaEnabled, setCobranzaEnabled] = useState(true);
+
+      // Proteccion de Pagos
+      const [proteccionFeeAnual, setProteccionFeeAnual] = useState(80000);
+      const [proteccionMontoMensual, setProteccionMontoMensual] = useState(15);
+      const [rateOverride, setRateOverride] = useState(null); // null = auto, number = manual
+      const [showRateOverride, setShowRateOverride] = useState(false);
+
+      // Perfil distribuidor (conciliacion)
+      const [branches, setBranches] = useState(3);
+      const [txns, setTxns] = useState(1400);
+      const [avgTxnAmount, setAvgTxnAmount] = useState(85000);
+
+      // Plataforma (seats)
+      const [seatsBasico, setSeatsBasico] = useState(3);
+      const [seatsPro, setSeatsPro] = useState(2);
+      const [seatsBusiness, setSeatsBusiness] = useState(1);
+      const [expandedTier, setExpandedTier] = useState(null);
+
+      // ALMA
+      const [almaPack, setAlmaPack] = useState("profesional");
+
+      // Cobranza
+      const [cobranzaFacturas, setCobranzaFacturas] = useState(20);
+      const [cobranzaAvgAmount, setCobranzaAvgAmount] = useState(25000);
+      const [cobranzaRate, setCobranzaRate] = useState(10);
+      const [cobranzaRecovery, setCobranzaRecovery] = useState(70);
+
+      // Comparison
+      const [manualStaff, setManualStaff] = useState(4);
+      const [avgSalary, setAvgSalary] = useState(17500);
+
+      // Proyeccion
+      const [growthRate, setGrowthRate] = useState(5);
+      const [showProyeccion, setShowProyeccion] = useState(false);
+      const [moraRate, setMoraRate] = useState(8); // % de venta que se pierde sin proteccion
+
+      // Propuesta Comercial
+      const [showPropuesta, setShowPropuesta] = useState(false);
+      const [propuestaStep, setPropuestaStep] = useState("form");
+      const [pdfPropuesta, setPdfPropuesta] = useState(true);
+      const [pdfBrochure, setPdfBrochure] = useState(true);
+      const [propuestaData, setPropuestaData] = useState({
+        empresa: "",
+        contacto: "",
+        email: "",
+        cargo: "",
+        vigencia: 7,
+      });
+
+      const calc = useMemo(() => {
+        // Seats — solo cobran si conciliacion esta activa
+        const totalSeats = plataformaEnabled ? seatsBasico + seatsPro + seatsBusiness : 0;
+        const seatsCobrables = plataformaEnabled && conciliacionEnabled;
+        const basicoCost = seatsCobrables ? seatsBasico * seatTiers.basico.price : 0;
+        const proCost = seatsCobrables ? seatsPro * seatTiers.pro.price : 0;
+        const businessCost = seatsCobrables ? seatsBusiness * seatTiers.business.price : 0;
+        const totalSeatsCost = basicoCost + proCost + businessCost;
+
+        // Proteccion de Pagos
+        const proteccionMontoReal = proteccionEnabled ? proteccionMontoMensual * 1000000 : 0;
+        const proteccionTier = getProteccionRate(proteccionMontoMensual);
+        const proteccionAutoRate = proteccionTier.rate;
+        const proteccionRate = proteccionEnabled ? (rateOverride !== null ? rateOverride : proteccionAutoRate) : 0;
+        const protectedTxns = proteccionEnabled ? Math.round(proteccionMontoReal / Math.max(avgTxnAmount, 1)) : 0;
+        const proteccionComisionMensual = proteccionEnabled ? Math.round(proteccionMontoReal * proteccionRate / 100) : 0;
+
+        // Conciliation
+        const unprotectedTxns = conciliacionEnabled ? Math.max(0, txns - protectedTxns) : 0;
+        const conciliationPrice = getTxnPrice(unprotectedTxns);
+        const conciliationTotal = conciliacionEnabled ? unprotectedTxns * conciliationPrice : 0;
+
+        // ALMA
+        const almaPackInfo = almaPacks.find(p => p.id === almaPack);
+        const almaCost = almaEnabled ? almaPackInfo.price : 0;
+
+        // Cobranza
+        const cobranzaRecovered = cobranzaFacturas * cobranzaAvgAmount * (cobranzaRecovery / 100);
+        const cobranzaCost = cobranzaEnabled ? cobranzaRecovered * (cobranzaRate / 100) : 0;
+
+        // Totals — mensual solo lo que se paga mes a mes
+        const totalMensual = totalSeatsCost + proteccionComisionMensual + conciliationTotal + almaCost + cobranzaCost;
+        const totalPagosAnuales = proteccionEnabled ? proteccionFeeAnual : 0;
+        const totalAnual = totalMensual * 12 + totalPagosAnuales;
+
+        // Comparison
+        const manualCost = manualStaff * avgSalary;
+        const mangoSaasCost = totalSeatsCost + conciliationTotal + almaCost;
+        const savings = manualCost - mangoSaasCost;
+        const savingsPct = manualCost > 0 ? (savings / manualCost) * 100 : 0;
+
+        // Active product count
+        const activeProducts = [proteccionEnabled, conciliacionEnabled, plataformaEnabled, almaEnabled, cobranzaEnabled].filter(Boolean).length;
+
+        return {
+          totalSeats, basicoCost, proCost, businessCost, totalSeatsCost,
+          protectedTxns, unprotectedTxns, proteccionMontoReal, proteccionRate,
+          proteccionComisionMensual,
+          conciliationPrice, conciliationTotal,
+          almaPackInfo, almaCost,
+          cobranzaRecovered, cobranzaCost,
+          totalMensual, totalPagosAnuales, totalAnual,
+          manualCost, mangoSaasCost, savings, savingsPct,
+          activeProducts,
+        };
+      }, [seatsBasico, seatsPro, seatsBusiness, txns, avgTxnAmount, branches, proteccionEnabled, proteccionFeeAnual, proteccionMontoMensual, rateOverride, conciliacionEnabled, plataformaEnabled, almaEnabled, almaPack, cobranzaEnabled, cobranzaFacturas, cobranzaAvgAmount, cobranzaRate, cobranzaRecovery, manualStaff, avgSalary]);
+
+      return (
+        <div style={{ minHeight: "100vh", background: T.bg }}>
+          {/* Header */}
+          <div style={{ background: T.dark, padding: "16px 32px", display: "flex", alignItems: "center", gap: 12, position: "sticky", top: 0, zIndex: 100, boxShadow: "0 2px 8px rgba(0,0,0,0.15)" }}>
+            <div style={{ width: 36, height: 36, background: T.primary, borderRadius: 10, display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 800, fontSize: 20, color: T.dark, fontStyle: "italic" }}>M</div>
+            <div>
+              <div style={{ color: "#fff", fontSize: 16, fontWeight: 700 }}>Mango</div>
+              <div style={{ color: T.textMuted, fontSize: 11 }}>Proteccion de Pagos · Cobros · Inteligencia · Cobranza</div>
+            </div>
+            <div style={{ marginLeft: "auto", display: "flex", gap: 8, alignItems: "center" }}>
+              <span style={{ color: T.textMuted, fontSize: 12 }}>{calc.activeProducts} productos activos</span>
+              <Badge color={T.dark} bg={T.primary}>Cotizador a la medida</Badge>
+            </div>
+          </div>
+
+          <div style={{ maxWidth: 1100, margin: "0 auto", padding: "24px 24px" }}>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20 }}>
+
+              {/* LEFT — Product toggles */}
+              <div>
+                {/* 1. Proteccion de Pagos */}
+                <ProductCard title="Proteccion de Pagos" badge="CORE" badgeColor={T.dark} badgeBg={T.primary} enabled={proteccionEnabled} onChange={setProteccionEnabled} toggleColor={T.primary} accentBorder={T.primary}>
+                  <ProductBrief
+                    icon={Icons.shield}
+                    color={T.primary}
+                    colorBg={T.primaryLight}
+                    problem="¿Vendes a credito y no sabes si te van a pagar?"
+                    solution="Mango garantiza el pago de tus ventas a constructores. Tu surtes con confianza y nosotros asumimos el riesgo. Si el constructor no paga, Mango te paga."
+                    benefits={["Garantia de pago", "Vende sin riesgo", "Mango asume la perdida", "Cobra puntual siempre"]}
+                  />
+                  <Slider label="Monto total protegido mensual" value={proteccionMontoMensual} onChange={setProteccionMontoMensual} min={1} max={80} step={1} formatVal={v => `$${v}M MXN`} />
+                  <div style={{ marginBottom: 20 }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
+                      <span style={{ color: T.textSecondary, fontSize: 13, fontWeight: 500 }}>Fee de habilitacion</span>
+                      <span style={{ color: T.dark, fontSize: 14, fontWeight: 700 }}>PAGO ANUAL</span>
+                    </div>
+                    <input type="range" min={35000} max={200000} step={5000} value={proteccionFeeAnual}
+                      onChange={e => setProteccionFeeAnual(Number(e.target.value))}
+                      style={{ width: "100%", height: 6, appearance: "none",
+                        background: `linear-gradient(to right, ${T.primary} 0%, ${T.primary} ${((proteccionFeeAnual - 35000) / (200000 - 35000)) * 100}%, ${T.border} ${((proteccionFeeAnual - 35000) / (200000 - 35000)) * 100}%, ${T.border} 100%)`,
+                        borderRadius: 3, outline: "none", cursor: "pointer" }} />
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginTop: 8, padding: "10px 14px", background: T.bg, borderRadius: 6 }}>
+                      <div>
+                        <div style={{ fontSize: 20, fontWeight: 800, color: T.dark }}>{fmt(proteccionFeeAnual)}<span style={{ fontSize: 12, fontWeight: 600, color: T.textMuted }}> /ano</span></div>
+                        <div style={{ fontSize: 12, color: T.textSecondary, marginTop: 2 }}>equivale a <strong>{fmt(Math.round(proteccionFeeAnual / 12))}</strong>/mes</div>
+                      </div>
+                      <Badge color={T.dark} bg={T.primaryLight}>1 pago anual</Badge>
+                    </div>
+                  </div>
+                  <div style={{ padding: "12px", background: T.bg, borderRadius: 6, marginBottom: 12 }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                      <div style={{ fontSize: 11, color: T.textMuted }}>Comision segun monto protegido</div>
+                      <div onClick={() => { setShowRateOverride(!showRateOverride); if (showRateOverride) { setRateOverride(null); } }}
+                        style={{ cursor: "pointer", padding: 3, borderRadius: 4, opacity: showRateOverride ? 1 : 0.35, transition: "opacity 0.2s" }}
+                        title="Ajustar tasa">
+                        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke={T.textSecondary} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>
+                      </div>
+                    </div>
+                    {!showRateOverride ? (
+                      <div style={{ display: "flex", gap: 3, alignItems: "flex-end" }}>
+                        {proteccionTiers.map((t, i) => {
+                          const isActive = proteccionMontoMensual >= t.min && proteccionMontoMensual < t.max;
+                          const height = 32 - (i * 4);
+                          return (
+                            <div key={i} style={{ flex: 1, textAlign: "center" }}>
+                              <div style={{ height, borderRadius: 3, background: isActive ? T.primary : T.border, transition: "all 0.2s" }} />
+                              <div style={{ fontSize: 10, color: isActive ? T.dark : T.textMuted, marginTop: 3, fontWeight: isActive ? 800 : 400 }}>{t.rate}%</div>
+                              <div style={{ fontSize: 8, color: T.textMuted, marginTop: 1 }}>{t.label}</div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <div>
+                        <Slider label="Comision negociada" value={rateOverride !== null ? rateOverride : getProteccionRate(proteccionMontoMensual).rate} onChange={v => setRateOverride(v)} min={1.5} max={2.0} step={0.05} formatVal={v => `${v.toFixed(2)}%`} />
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                          <span style={{ fontSize: 10, color: T.textMuted }}>Tasa automatica seria: {getProteccionRate(proteccionMontoMensual).rate}%</span>
+                          <span onClick={() => { setRateOverride(null); setShowRateOverride(false); }} style={{ fontSize: 10, color: T.blue, cursor: "pointer", fontWeight: 600 }}>Restaurar automatica</span>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                  <div style={{ padding: "12px", background: T.primaryLight, borderRadius: 6 }}>
+                    <div style={{ fontSize: 10, fontWeight: 700, color: T.textMuted, letterSpacing: "0.06em", textTransform: "uppercase", marginBottom: 8 }}>Resumen Proteccion de Pagos</div>
+                    <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
+                      <span style={{ fontSize: 11, color: T.textSecondary }}>Monto protegido mensual</span>
+                      <span style={{ fontSize: 12, fontWeight: 700, color: T.dark }}>{fmt(calc.proteccionMontoReal)}</span>
+                    </div>
+                    <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
+                      <span style={{ fontSize: 11, color: T.textSecondary }}>~Transacciones protegidas</span>
+                      <span style={{ fontSize: 12, fontWeight: 700, color: T.dark }}>{calc.protectedTxns.toLocaleString()} tx/mes</span>
+                    </div>
+                    <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
+                      <span style={{ fontSize: 11, color: T.textSecondary }}>Comision aplicada {rateOverride !== null ? "(negociada)" : ""}</span>
+                      <span style={{ fontSize: 12, fontWeight: 800, color: rateOverride !== null ? T.blue : T.dark }}>{calc.proteccionRate.toFixed(2)}%</span>
+                    </div>
+                    <div style={{ borderTop: `1px solid ${T.primary}44`, paddingTop: 8, marginTop: 4 }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
+                        <span style={{ fontSize: 11, color: T.textSecondary }}>Fee habilitacion (anual)</span>
+                        <span style={{ fontSize: 12, fontWeight: 700, color: T.dark }}>{fmt(proteccionFeeAnual)}/ano</span>
+                      </div>
+                      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
+                        <span style={{ fontSize: 11, color: T.textSecondary }}>Comision mensual</span>
+                        <span style={{ fontSize: 12, fontWeight: 700, color: T.dark }}>{fmt(calc.proteccionComisionMensual)}/mes</span>
+                      </div>
+                      <div style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", borderTop: `1px solid ${T.primary}44`, marginTop: 4 }}>
+                        <span style={{ fontSize: 12, fontWeight: 700, color: T.dark }}>Costo total primer ano</span>
+                        <span style={{ fontSize: 14, fontWeight: 800, color: T.dark }}>{fmt(proteccionFeeAnual + calc.proteccionComisionMensual * 12)}</span>
+                      </div>
+                      <div style={{ fontSize: 10, color: T.textSecondary, marginTop: 2 }}>
+                        = {fmt(proteccionFeeAnual)} (fee unico) + {fmt(calc.proteccionComisionMensual)} x 12 meses
+                      </div>
+                    </div>
+                  </div>
+                </ProductCard>
+
+                {/* 2. Conciliacion */}
+                <ProductCard title="Conciliacion" badge="COBROS" badgeColor={T.orange} badgeBg={T.orangeLight} enabled={conciliacionEnabled} onChange={setConciliacionEnabled} toggleColor={T.orange} accentBorder={conciliacionEnabled ? T.orange : null}>
+                  <ProductBrief
+                    icon={Icons.receipt}
+                    color={T.orange}
+                    colorBg={T.orangeLight}
+                    problem="¿Tus auxiliares pasan horas cuadrando pagos con facturas?"
+                    solution="Recibe pagos en una CLABE dedicada y Mango los cruza automaticamente contra tus facturas SAT. Sabes al instante quien te pago, cuanto y que factura cubre."
+                    benefits={["Match automatico", "CLABE dedicada", "Facturas SAT en vivo", "Ahorra horas de Excel"]}
+                  />
+                  <Slider label="Sucursales" value={branches} onChange={setBranches} min={1} max={15} />
+                  <Slider label="Transacciones totales / mes" value={txns} onChange={setTxns} min={100} max={8000} step={50} formatVal={v => v.toLocaleString()} />
+                  <Slider label="Monto promedio por transaccion" value={avgTxnAmount} onChange={setAvgTxnAmount} min={10000} max={500000} step={5000} formatVal={v => fmt(v)} />
+                  {calc.unprotectedTxns > 0 && (
+                    <div style={{ padding: "10px 12px", background: T.bg, borderRadius: 6, marginTop: 4 }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
+                        <span style={{ fontSize: 12, color: T.textSecondary }}>Fee conciliacion ({proteccionEnabled ? "tx no protegidas" : "todas las tx"})</span>
+                        <span style={{ fontSize: 14, fontWeight: 800, color: T.dark }}>{fmt(calc.conciliationPrice)}/tx</span>
+                      </div>
+                      <div style={{ fontSize: 11, color: T.textMuted, marginBottom: 8 }}>A mayor volumen, menor costo por transaccion</div>
+                      <div style={{ display: "flex", gap: 3, alignItems: "flex-end" }}>
+                        {txnTiers.slice(0, 5).map((t, i) => {
+                          const isActive = calc.unprotectedTxns >= t.min && calc.unprotectedTxns <= t.max;
+                          return (
+                            <div key={i} style={{ flex: 1, textAlign: "center" }}>
+                              <div style={{ height: 28 - (i * 4), borderRadius: 3, background: isActive ? T.orange : T.border, transition: "all 0.2s" }} />
+                              <div style={{ fontSize: 9, color: isActive ? T.dark : T.textMuted, marginTop: 3, fontWeight: isActive ? 700 : 400 }}>${t.price}</div>
+                              <div style={{ fontSize: 8, color: T.textMuted, marginTop: 1 }}>{t.min === 0 ? "0" : t.min > 999 ? `${(t.min/1000).toFixed(0)}K` : t.min}+</div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                      {proteccionEnabled && (
+                        <div style={{ fontSize: 11, color: T.textMuted, marginTop: 8 }}>
+                          {calc.protectedTxns.toLocaleString()} tx protegidas (sin fee) · {calc.unprotectedTxns.toLocaleString()} tx con fee · Total: {fmt(calc.conciliationTotal)}/mes
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </ProductCard>
+
+                {/* 3. Plataforma (Asientos) */}
+                <ProductCard title="Plataforma" badge="SAAS" badgeColor={T.blue} badgeBg={T.blueLight} enabled={plataformaEnabled} onChange={setPlataformaEnabled} toggleColor={T.blue} accentBorder={plataformaEnabled ? T.blue : null}>
+                  <ProductBrief
+                    icon={Icons.monitor}
+                    color={T.blue}
+                    colorBg={T.blueLight}
+                    problem="¿No tienes visibilidad en tiempo real de tu cartera?"
+                    solution="Dashboard con el estatus de cada cliente, factura y pago. Operativos ven lo del dia, gerencia ve tendencias, direccion ve todo el negocio consolidado."
+                    benefits={["Dashboard en tiempo real", "Roles por nivel", "Multi-sucursal", "Exporta a Excel"]}
+                  />
+                  {!conciliacionEnabled && (
+                    <div style={{ padding: "8px 12px", background: T.greenLight, borderRadius: 6, marginBottom: 16, display: "flex", alignItems: "center", gap: 6 }}>
+                      <span style={{ color: T.green, fontSize: 14, fontWeight: 700 }}>&#10003;</span>
+                      <span style={{ fontSize: 12, fontWeight: 600, color: T.green }}>Incluido sin costo con Proteccion de Pagos</span>
+                    </div>
+                  )}
+                  <SeatCounter tier="basico" count={seatsBasico} onChange={setSeatsBasico} />
+                  <SeatCounter tier="pro" count={seatsPro} onChange={setSeatsPro} />
+                  <SeatCounter tier="business" count={seatsBusiness} onChange={setSeatsBusiness} />
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 12, padding: "10px 14px", background: T.bg, borderRadius: T.radiusButton }}>
+                    <span style={{ fontSize: 13, fontWeight: 600, color: T.textSecondary }}>Total asientos</span>
+                    <span style={{ fontSize: 16, fontWeight: 800, color: T.dark }}>{calc.totalSeats} · {fmt(calc.totalSeatsCost)}/mes</span>
+                  </div>
+                  <div style={{ marginTop: 12, display: "flex", gap: 6 }}>
+                    {["basico", "pro", "business"].map(tier => (
+                      <button key={tier} onClick={() => setExpandedTier(expandedTier === tier ? null : tier)}
+                        style={{ flex: 1, padding: "6px 8px", border: `1px solid ${expandedTier === tier ? seatTiers[tier].color : T.border}`, borderRadius: T.radiusButton, background: expandedTier === tier ? seatTiers[tier].colorBg : T.surface, cursor: "pointer", fontSize: 11, fontWeight: 600, color: expandedTier === tier ? seatTiers[tier].color : T.textMuted, textAlign: "center" }}>
+                        Ver {seatTiers[tier].label}
+                      </button>
+                    ))}
+                  </div>
+                  {expandedTier && (
+                    <div style={{ padding: 16, background: T.bg, borderRadius: T.radiusButton, marginTop: 8 }}>
+                      <div style={{ fontSize: 12, fontWeight: 700, color: seatTiers[expandedTier].color, marginBottom: 8, textTransform: "uppercase", letterSpacing: "0.04em" }}>
+                        {seatTiers[expandedTier].label} — {seatTiers[expandedTier].role}
+                      </div>
+                      {seatTiers[expandedTier].features.map((f, i) => (
+                        <div key={i} style={{ display: "flex", alignItems: "flex-start", gap: 6, marginBottom: 4 }}>
+                          <span style={{ color: T.green, fontSize: 12, marginTop: 1, flexShrink: 0 }}>&#10003;</span>
+                          <span style={{ fontSize: 12, color: T.textSecondary }}>{f}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </ProductCard>
+
+                {/* 4. ALMA */}
+                <ProductCard title="ALMA — Inteligencia Artificial" badge="AI" badgeColor={T.purple} badgeBg={T.purpleLight} enabled={almaEnabled} onChange={setAlmaEnabled} toggleColor={T.purple} accentBorder={almaEnabled ? T.purple : null}>
+                  <ProductBrief
+                    icon={Icons.sparkles}
+                    color={T.purple}
+                    colorBg={T.purpleLight}
+                    problem="¿Necesitas respuestas de tu cartera sin esperar reportes?"
+                    solution="Preguntale a ALMA en lenguaje natural: quien te debe, que se vence, como va la cobranza. Responde en segundos con datos reales de tu operacion."
+                    benefits={["Lenguaje natural", "Datos en tiempo real", "Analisis y predicciones", "Sin capacitacion"]}
+                  />
+                  <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+                    {almaPacks.map(p => {
+                      const sel = almaPack === p.id;
+                      return (
+                        <button key={p.id} onClick={() => setAlmaPack(p.id)}
+                          style={{ flex: 1, padding: "12px 8px", border: `1px solid ${sel ? T.purple : T.border}`, borderRadius: T.radiusButton, background: sel ? T.purpleLight : T.surface, cursor: "pointer", textAlign: "center", transition: "all 0.2s" }}>
+                          <div style={{ fontSize: 11, fontWeight: 700, color: sel ? T.purple : T.textMuted, textTransform: "uppercase", letterSpacing: "0.04em" }}>{p.label}</div>
+                          <div style={{ fontSize: 18, fontWeight: 800, color: sel ? T.purple : T.text, marginTop: 4 }}>{p.queries}</div>
+                          <div style={{ fontSize: 10, color: T.textMuted }}>creditos/mes</div>
+                          <div style={{ fontSize: 13, fontWeight: 700, color: sel ? T.purple : T.text, marginTop: 6 }}>{fmt(p.price)}</div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                  {/* Ejemplos del pack seleccionado */}
+                  {(() => {
+                    const pack = almaPacks.find(p => p.id === almaPack);
+                    return (
+                      <div style={{ padding: "14px", background: T.purpleLight, borderRadius: 8, border: `1px solid ${T.purple}22` }}>
+                        <div style={{ fontSize: 11, fontWeight: 700, color: T.purple, marginBottom: 4 }}>{pack.label} — {pack.desc}</div>
+                        <div style={{ marginTop: 8 }}>
+                          {pack.examples.map((ex, i) => (
+                            <div key={i} style={{ display: "flex", alignItems: "flex-start", gap: 6, marginBottom: 5 }}>
+                              {ex.startsWith("Todo") ? (
+                                <span style={{ fontSize: 12, color: T.textMuted, fontStyle: "italic" }}>{ex}</span>
+                              ) : (
+                                <>
+                                  <span style={{ color: T.purple, fontSize: 11, marginTop: 1, flexShrink: 0 }}>&#9679;</span>
+                                  <span style={{ fontSize: 12, color: T.text, fontStyle: "italic" }}>{ex}</span>
+                                </>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  })()}
+                </ProductCard>
+
+                {/* 5. Cobranza */}
+                <ProductCard title="Cobranza" badge="POR EXITO" badgeColor={T.green} badgeBg={T.greenLight} enabled={cobranzaEnabled} onChange={setCobranzaEnabled} toggleColor={T.green} accentBorder={cobranzaEnabled ? T.green : null}>
+                  <ProductBrief
+                    icon={Icons.handshake}
+                    color={T.green}
+                    colorBg={T.greenLight}
+                    problem="¿Tienes facturas vencidas que nadie persigue?"
+                    solution="Mango gestiona tu cartera vencida de forma activa. Contactamos al deudor, negociamos y recuperamos. Tu solo pagas un porcentaje de lo que efectivamente se cobra."
+                    benefits={["Solo pagas por exito", "Gestion profesional", "Sin riesgo", "Recupera cartera muerta"]}
+                  />
+                  <Slider label="Facturas asignadas / mes" value={cobranzaFacturas} onChange={setCobranzaFacturas} min={0} max={100} />
+                  <Slider label="Monto promedio por factura" value={cobranzaAvgAmount} onChange={setCobranzaAvgAmount} min={5000} max={100000} step={1000} formatVal={v => fmt(v)} />
+                  <Slider label="Tasa de recuperacion" value={cobranzaRecovery} onChange={setCobranzaRecovery} min={30} max={95} suffix="%" />
+                  <Slider label="Comision Mango" value={cobranzaRate} onChange={setCobranzaRate} min={5} max={15} suffix="%" />
+                  <div style={{ padding: "10px 12px", background: T.greenLight, borderRadius: 6 }}>
+                    <div style={{ display: "flex", justifyContent: "space-between" }}>
+                      <span style={{ fontSize: 11, color: T.textSecondary }}>Recuperacion estimada</span>
+                      <span style={{ fontSize: 12, fontWeight: 700, color: T.green }}>{fmt(calc.cobranzaRecovered)}/mes</span>
+                    </div>
+                    <div style={{ display: "flex", justifyContent: "space-between", marginTop: 4 }}>
+                      <span style={{ fontSize: 11, color: T.textSecondary }}>Fee Mango ({cobranzaRate}%)</span>
+                      <span style={{ fontSize: 12, fontWeight: 800, color: T.dark }}>{fmt(calc.cobranzaCost)}/mes</span>
+                    </div>
+                  </div>
+                </ProductCard>
+
+                {/* Comparativa */}
+                <Card>
+                  <SectionTitle>Costo Manual Actual (comparativa)</SectionTitle>
+                  <Slider label="Personal conciliando" value={manualStaff} onChange={setManualStaff} min={1} max={10} suffix=" personas" />
+                  <Slider label="Nomina cargada promedio" value={avgSalary} onChange={setAvgSalary} min={10000} max={35000} step={500} formatVal={v => fmt(v)} />
+                </Card>
+              </div>
+
+              {/* RIGHT — Estado de Resultado */}
+              <div>
+                {/* PAGO PRIMER MES — hero */}
+                <div style={{ background: T.surface, border: `2px solid ${T.dark}`, borderRadius: T.radiusCard, padding: 24, marginBottom: 16, boxShadow: "0 4px 24px rgba(0,0,0,0.08)", position: "sticky", top: 80 }}>
+                  <div style={{ color: T.textMuted, fontSize: 10, fontWeight: 700, letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 8 }}>Pago Primer Mes</div>
+                  <div style={{ fontSize: 42, fontWeight: 800, color: T.dark, lineHeight: 1 }}>{fmt(calc.totalMensual + calc.totalPagosAnuales)}</div>
+                  <div style={{ color: T.textMuted, fontSize: 11, marginTop: 8 }}>{calc.activeProducts} productos activos</div>
+
+                  <div style={{ marginTop: 16, borderTop: `1px solid ${T.border}`, paddingTop: 12 }}>
+                    {calc.totalPagosAnuales > 0 && (
+                      <div style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", borderBottom: `1px solid ${T.border}` }}>
+                        <span style={{ color: T.primary, fontSize: 12, fontWeight: 700 }}>Fee habilitacion (pago unico anual)</span>
+                        <span style={{ color: T.dark, fontSize: 13, fontWeight: 800 }}>{fmt(calc.totalPagosAnuales)}</span>
+                      </div>
+                    )}
+                    <div style={{ display: "flex", justifyContent: "space-between", padding: "6px 0" }}>
+                      <span style={{ color: T.textSecondary, fontSize: 12 }}>Costos variables del mes</span>
+                      <span style={{ color: T.dark, fontSize: 13, fontWeight: 700 }}>{fmt(calc.totalMensual)}</span>
+                    </div>
+                  </div>
+
+                  <div style={{ marginTop: 12, padding: "12px 14px", background: T.primaryLight, borderRadius: 8 }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                      <div>
+                        <div style={{ color: T.textSecondary, fontSize: 10, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase" }}>A partir del mes 2</div>
+                        <div style={{ color: T.textMuted, fontSize: 11, marginTop: 2 }}>Solo costos variables recurrentes</div>
+                      </div>
+                      <div style={{ fontSize: 22, fontWeight: 800, color: T.dark }}>{fmt(calc.totalMensual)}<span style={{ fontSize: 12, color: T.textMuted }}>/mes</span></div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* ESTADO DE RESULTADO — P&L style */}
+                <Card>
+                  <SectionTitle>Estado de Resultado Mensual</SectionTitle>
+
+                  {/* === INGRESOS / VALOR — green section === */}
+                  {(proteccionEnabled || (cobranzaEnabled && calc.cobranzaRecovered > 0)) && (
+                    <div style={{ marginBottom: 16 }}>
+                      <div style={{ fontSize: 10, fontWeight: 700, color: T.green, letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 8 }}>Valor que genera Mango</div>
+
+                      {proteccionEnabled && (
+                        <div style={{ display: "flex", justifyContent: "space-between", padding: "8px 12px", background: T.greenLight, borderRadius: 6, marginBottom: 4 }}>
+                          <div>
+                            <div style={{ fontSize: 13, fontWeight: 700, color: T.green }}>Venta protegida mensual</div>
+                            <div style={{ fontSize: 11, color: T.textSecondary }}>{calc.protectedTxns.toLocaleString()} transacciones con garantia Mango</div>
+                          </div>
+                          <div style={{ fontSize: 18, fontWeight: 800, color: T.green, alignSelf: "center" }}>{fmt(calc.proteccionMontoReal)}</div>
+                        </div>
+                      )}
+
+                      {cobranzaEnabled && calc.cobranzaRecovered > 0 && (
+                        <div style={{ display: "flex", justifyContent: "space-between", padding: "8px 12px", background: T.greenLight, borderRadius: 6, marginBottom: 4 }}>
+                          <div>
+                            <div style={{ fontSize: 13, fontWeight: 700, color: T.green }}>Cartera recuperada</div>
+                            <div style={{ fontSize: 11, color: T.textSecondary }}>{cobranzaFacturas} facturas · {cobranzaRecovery}% tasa recuperacion</div>
+                          </div>
+                          <div style={{ fontSize: 18, fontWeight: 800, color: T.green, alignSelf: "center" }}>{fmt(calc.cobranzaRecovered)}</div>
+                        </div>
+                      )}
+
+                      {calc.savings > 0 && (
+                        <div style={{ display: "flex", justifyContent: "space-between", padding: "8px 12px", background: T.greenLight, borderRadius: 6 }}>
+                          <div>
+                            <div style={{ fontSize: 13, fontWeight: 700, color: T.green }}>Ahorro vs proceso manual</div>
+                            <div style={{ fontSize: 11, color: T.textSecondary }}>{manualStaff} personas x {fmt(avgSalary)} = {fmt(calc.manualCost)} vs {fmt(calc.mangoSaasCost)} Mango</div>
+                          </div>
+                          <div style={{ fontSize: 18, fontWeight: 800, color: T.green, alignSelf: "center" }}>{fmt(calc.savings)}</div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* === COSTOS VARIABLES — line items === */}
+                  <div style={{ fontSize: 10, fontWeight: 700, color: T.textMuted, letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 8 }}>Costos Mensuales (variables)</div>
+
+                  {proteccionEnabled && (
+                    <BreakdownRow label={`Comision proteccion ${getProteccionRate(proteccionMontoMensual).rate.toFixed(1)}%`} amount={calc.proteccionComisionMensual} pct={calc.totalMensual > 0 ? (calc.proteccionComisionMensual / calc.totalMensual) * 100 : 0} color={T.primary} sub={`$${proteccionMontoMensual}M x ${getProteccionRate(proteccionMontoMensual).rate.toFixed(1)}%`} />
+                  )}
+
+                  {conciliacionEnabled && calc.unprotectedTxns > 0 && (
+                    <BreakdownRow label={`Conciliacion · ${calc.unprotectedTxns.toLocaleString()} tx x ${fmt(calc.conciliationPrice)}`} amount={calc.conciliationTotal} pct={calc.totalMensual > 0 ? (calc.conciliationTotal / calc.totalMensual) * 100 : 0} color={T.orange} sub={proteccionEnabled ? "Solo tx no protegidas" : `${txns.toLocaleString()} tx totales`} />
+                  )}
+
+                  {plataformaEnabled && (
+                    <>
+                      {seatsBasico > 0 && <BreakdownRow label={`Basico · ${seatsBasico} x ${fmt(seatTiers.basico.price)}`} amount={calc.basicoCost} pct={calc.totalMensual > 0 ? (calc.basicoCost / calc.totalMensual) * 100 : 0} color={T.textMuted} />}
+                      {seatsPro > 0 && <BreakdownRow label={`Pro · ${seatsPro} x ${fmt(seatTiers.pro.price)}`} amount={calc.proCost} pct={calc.totalMensual > 0 ? (calc.proCost / calc.totalMensual) * 100 : 0} color={T.blue} />}
+                      {seatsBusiness > 0 && <BreakdownRow label={`Business · ${seatsBusiness} x ${fmt(seatTiers.business.price)}`} amount={calc.businessCost} pct={calc.totalMensual > 0 ? (calc.businessCost / calc.totalMensual) * 100 : 0} color={T.blue} />}
+                    </>
+                  )}
+
+                  {almaEnabled && <BreakdownRow label={`ALMA Pack (${calc.almaPackInfo.queries} creditos)`} amount={calc.almaCost} pct={calc.totalMensual > 0 ? (calc.almaCost / calc.totalMensual) * 100 : 0} color={T.purple} />}
+
+                  {cobranzaEnabled && calc.cobranzaCost > 0 && <BreakdownRow label={`Cobranza (${cobranzaRate}% de recuperado)`} amount={calc.cobranzaCost} pct={calc.totalMensual > 0 ? (calc.cobranzaCost / calc.totalMensual) * 100 : 0} color={T.green} />}
+
+                  {/* Total mensual */}
+                  <div style={{ display: "flex", justifyContent: "space-between", padding: "10px 0", marginTop: 4, borderTop: `2px solid ${T.dark}` }}>
+                    <span style={{ fontSize: 14, fontWeight: 800, color: T.dark }}>Total mensual</span>
+                    <span style={{ fontSize: 16, fontWeight: 800, color: T.dark }}>{fmt(calc.totalMensual)}</span>
+                  </div>
+
+                  {/* Fee anual aparte */}
+                  {calc.totalPagosAnuales > 0 && (
+                    <div style={{ marginTop: 12, padding: "12px 14px", background: T.primaryLight, borderRadius: 8, border: `1px dashed ${T.primary}66` }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                        <div>
+                          <div style={{ fontSize: 10, fontWeight: 700, color: T.textMuted, letterSpacing: "0.06em", textTransform: "uppercase" }}>Pago Anual (una vez al ano)</div>
+                          <div style={{ fontSize: 12, color: T.textSecondary, marginTop: 2 }}>Fee habilitacion Proteccion de Pagos</div>
+                        </div>
+                        <div style={{ fontSize: 16, fontWeight: 800, color: T.dark }}>{fmt(calc.totalPagosAnuales)}</div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* No active products */}
+                  {calc.activeProducts === 0 && (
+                    <div style={{ textAlign: "center", padding: "24px 0", color: T.textMuted, fontSize: 13 }}>
+                      Activa al menos un producto para ver el desglose.
+                    </div>
+                  )}
+
+                  {/* Visual bar */}
+                  {calc.totalMensual > 0 && (
+                    <div style={{ marginTop: 16 }}>
+                      <div style={{ display: "flex", height: 8, borderRadius: 4, overflow: "hidden", gap: 2 }}>
+                        {calc.proteccionComisionMensual > 0 && <div style={{ width: `${(calc.proteccionComisionMensual / calc.totalMensual) * 100}%`, background: T.primary, borderRadius: 2 }} />}
+                        {calc.conciliationTotal > 0 && <div style={{ width: `${(calc.conciliationTotal / calc.totalMensual) * 100}%`, background: T.orange, borderRadius: 2 }} />}
+                        {calc.totalSeatsCost > 0 && <div style={{ width: `${(calc.totalSeatsCost / calc.totalMensual) * 100}%`, background: T.blue, borderRadius: 2 }} />}
+                        {calc.almaCost > 0 && <div style={{ width: `${(calc.almaCost / calc.totalMensual) * 100}%`, background: T.purple, borderRadius: 2 }} />}
+                        {calc.cobranzaCost > 0 && <div style={{ width: `${(calc.cobranzaCost / calc.totalMensual) * 100}%`, background: T.green, borderRadius: 2 }} />}
+                      </div>
+                      <div style={{ display: "flex", gap: 12, marginTop: 8, flexWrap: "wrap" }}>
+                        {proteccionEnabled && <span style={{ fontSize: 10, color: T.textMuted, display: "flex", alignItems: "center", gap: 4 }}><span style={{ width: 6, height: 6, borderRadius: 2, background: T.primary, display: "inline-block" }} /> Proteccion</span>}
+                        {conciliacionEnabled && calc.conciliationTotal > 0 && <span style={{ fontSize: 10, color: T.textMuted, display: "flex", alignItems: "center", gap: 4 }}><span style={{ width: 6, height: 6, borderRadius: 2, background: T.orange, display: "inline-block" }} /> Conciliacion</span>}
+                        {plataformaEnabled && <span style={{ fontSize: 10, color: T.textMuted, display: "flex", alignItems: "center", gap: 4 }}><span style={{ width: 6, height: 6, borderRadius: 2, background: T.blue, display: "inline-block" }} /> Plataforma</span>}
+                        {almaEnabled && <span style={{ fontSize: 10, color: T.textMuted, display: "flex", alignItems: "center", gap: 4 }}><span style={{ width: 6, height: 6, borderRadius: 2, background: T.purple, display: "inline-block" }} /> ALMA</span>}
+                        {cobranzaEnabled && calc.cobranzaCost > 0 && <span style={{ fontSize: 10, color: T.textMuted, display: "flex", alignItems: "center", gap: 4 }}><span style={{ width: 6, height: 6, borderRadius: 2, background: T.green, display: "inline-block" }} /> Cobranza</span>}
+                      </div>
+                    </div>
+                  )}
+                </Card>
+
+                {/* Proyeccion CTA */}
+                {calc.totalMensual > 0 && (
+                  <div onClick={() => setShowProyeccion(true)} style={{ padding: "16px 20px", background: T.surface, border: `2px solid ${T.green}`, borderRadius: T.radiusCard, marginBottom: 16, cursor: "pointer", display: "flex", justifyContent: "space-between", alignItems: "center", transition: "all 0.2s" }}>
+                    <div>
+                      <div style={{ fontSize: 13, fontWeight: 700, color: T.dark }}>Proyeccion a 12 Meses</div>
+                      <div style={{ fontSize: 11, color: T.textSecondary, marginTop: 2 }}>Ve como crece el valor de tu inversion con Mango</div>
+                    </div>
+                    <div style={{ width: 32, height: 32, borderRadius: 8, background: T.greenLight, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={T.green} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+                    </div>
+                  </div>
+                )}
+
+                {/* Crear Propuesta CTA */}
+                {calc.totalMensual > 0 && (
+                  <div onClick={() => { setShowPropuesta(true); setPropuestaStep("form"); }} style={{ padding: "16px 20px", background: T.primary, borderRadius: T.radiusCard, marginBottom: 16, cursor: "pointer", display: "flex", justifyContent: "space-between", alignItems: "center", transition: "all 0.2s", boxShadow: "0 2px 12px rgba(255,206,0,0.3)" }}>
+                    <div>
+                      <div style={{ fontSize: 13, fontWeight: 700, color: T.dark }}>Crear Propuesta Comercial</div>
+                      <div style={{ fontSize: 11, color: T.dark + "aa", marginTop: 2 }}>Genera un documento profesional para enviar al cliente</div>
+                    </div>
+                    <div style={{ width: 32, height: 32, borderRadius: 8, background: "rgba(0,0,0,0.1)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={T.dark} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"/><polyline points="14 2 14 8 20 8"/><line x1="16" x2="8" y1="13" y2="13"/><line x1="16" x2="8" y1="17" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+                    </div>
+                  </div>
+                )}
+
+                {/* Feature matrix — only if plataforma active */}
+                {plataformaEnabled && (
+                  <Card>
+                    <SectionTitle>Matriz de Acceso por Nivel</SectionTitle>
+                    <div style={{ overflowX: "auto" }}>
+                      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+                        <thead>
+                          <tr>
+                            <th style={{ textAlign: "left", padding: "8px 10px", borderBottom: `2px solid ${T.border}`, color: T.textMuted, fontWeight: 600, fontSize: 11 }}>Capacidad</th>
+                            {["basico", "pro", "business"].map(t => (
+                              <th key={t} style={{ textAlign: "center", padding: "8px 10px", borderBottom: `2px solid ${T.border}`, color: seatTiers[t].color, fontWeight: 700, fontSize: 11 }}>
+                                {seatTiers[t].label}<div style={{ fontSize: 9, color: T.textMuted, fontWeight: 500 }}>{seatTiers[t].role}</div>
+                              </th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {[
+                            ["Dashboard conciliacion", true, true, true],
+                            ["Facturas y pagos", true, true, true],
+                            ["Registro manual", true, true, true],
+                            ["Export Excel", true, true, true],
+                            ["Proteccion de Pagos", true, true, true],
+                            ["Reportes aging", false, true, true],
+                            ["Alertas deterioro", false, true, true],
+                            ["Multi-sucursal", false, "Sus sucursales", "Todas"],
+                            ["ALMA Chat", false, "Pack creditos", "Ilimitado"],
+                            ["Ghost Extension", false, true, true],
+                            ["Screen recording", false, false, true],
+                            ["Reportes programados", false, false, true],
+                            ["API / Webhooks", false, false, true],
+                            ["Analisis predictivo", false, false, true],
+                          ].map(([feature, basic, pro, biz], i) => (
+                            <tr key={i}>
+                              <td style={{ padding: "6px 10px", borderBottom: `1px solid ${T.border}`, color: T.text, fontSize: 12 }}>{feature}</td>
+                              {[basic, pro, biz].map((val, j) => (
+                                <td key={j} style={{ textAlign: "center", padding: "6px 10px", borderBottom: `1px solid ${T.border}` }}>
+                                  {val === true ? <span style={{ color: T.green, fontWeight: 700 }}>&#10003;</span>
+                                    : val === false ? <span style={{ color: T.border }}>—</span>
+                                    : <span style={{ fontSize: 10, color: T.textSecondary }}>{val}</span>}
+                                </td>
+                              ))}
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </Card>
+                )}
+
+                {/* Included — dynamic based on active products */}
+                <Card style={{ background: T.primaryLight, border: `1px solid ${T.primary}33` }}>
+                  <SectionTitle>Incluido en tu Plan</SectionTitle>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                    {[
+                      proteccionEnabled ? ["Proteccion de Pagos", "Mango garantiza el pago al proveedor"] : null,
+                      conciliacionEnabled ? ["Conciliacion automatica", "Match STP a factura en tiempo real"] : null,
+                      conciliacionEnabled ? ["CLABE dedicada", "Centro de costos STP propio"] : null,
+                      conciliacionEnabled ? ["Facturas SAT sincronizadas", "Conexion CIEC, ultimos 6 meses"] : null,
+                      plataformaEnabled ? ["Dashboard en vivo", "Cartera, aging, estatus por cliente"] : null,
+                      almaEnabled ? ["ALMA — asistente inteligente", "Preguntale sobre tu cartera en lenguaje natural"] : null,
+                      cobranzaEnabled ? ["Cobranza activa", "Solo pagas por lo que se recupera"] : null,
+                    ].filter(Boolean).map(([title, desc], i) => (
+                      <div key={i} style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
+                        <span style={{ color: T.green, fontSize: 14, marginTop: 1, flexShrink: 0 }}>&#10003;</span>
+                        <div>
+                          <div style={{ fontSize: 12, fontWeight: 700, color: T.dark }}>{title}</div>
+                          <div style={{ fontSize: 11, color: T.textSecondary }}>{desc}</div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </Card>
+              </div>
+            </div>
+
+            <div style={{ textAlign: "center", padding: "32px 0 16px", color: T.textMuted, fontSize: 11 }}>
+              Mango Financial Technologies · Cotizador · 2026
+            </div>
+          </div>
+
+          {/* ======= MODAL PROYECCION FULLSCREEN ======= */}
+          {showProyeccion && (() => {
+            const months = [];
+            for (let m = 1; m <= 12; m++) {
+              const growth = Math.pow(1 + growthRate / 100, m - 1);
+              const ventaProtegida = proteccionEnabled ? calc.proteccionMontoReal * growth : 0;
+              const cobranzaRec = cobranzaEnabled ? calc.cobranzaRecovered * growth : 0;
+              const ahorroManual = calc.savings > 0 ? calc.savings : 0;
+              const costoMango = calc.totalMensual * (1 + (growthRate / 100 * (m - 1) * 0.3));
+              const valorGenerado = ventaProtegida + cobranzaRec + ahorroManual;
+              months.push({ m, growth, ventaProtegida, cobranzaRec, ahorroManual, costoMango, valorGenerado });
+            }
+            const totalInversion = calc.totalPagosAnuales + months.reduce((s, m) => s + m.costoMango, 0);
+            const totalValor = months.reduce((s, m) => s + m.valorGenerado, 0);
+            const roi = totalInversion > 0 ? ((totalValor - totalInversion) / totalInversion * 100) : 0;
+            const maxBar = Math.max(...months.map(m => Math.max(m.valorGenerado, m.costoMango)));
+            const monthNames = ["Ene","Feb","Mar","Abr","May","Jun","Jul","Ago","Sep","Oct","Nov","Dic"];
+
+            // Mora — perdida sin Mango
+            const ventaAnualTotal = months.reduce((s, m) => s + m.ventaProtegida, 0);
+            const perdidaMora = ventaAnualTotal * (moraRate / 100);
+            // Venta que no se cierra sin ofrecer credito protegido (conservador 15%)
+            const ventaPerdidaPct = 15;
+            const ventaPerdida = ventaAnualTotal * (ventaPerdidaPct / 100);
+            const costoSinMango = perdidaMora + ventaPerdida + (calc.manualCost * 12);
+            const costoConMango = totalInversion;
+            const beneficioNeto = costoSinMango - costoConMango;
+
+            return (
+              <div style={{ position: "fixed", inset: 0, zIndex: 999, background: "rgba(0,0,0,0.6)", display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }}
+                onClick={e => { if (e.target === e.currentTarget) setShowProyeccion(false); }}>
+                <div style={{ background: T.surface, borderRadius: 20, width: "100%", maxWidth: 960, maxHeight: "92vh", overflow: "auto", boxShadow: "0 24px 80px rgba(0,0,0,0.25)" }}>
+
+                  {/* Header */}
+                  <div style={{ padding: "24px 32px 0", display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                    <div>
+                      <div style={{ fontSize: 10, fontWeight: 700, color: T.green, letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 4 }}>Proyeccion de Valor</div>
+                      <div style={{ fontSize: 24, fontWeight: 800, color: T.dark }}>12 Meses con Mango</div>
+                      <div style={{ fontSize: 13, color: T.textSecondary, marginTop: 4 }}>Simulacion basada en tu configuracion actual con {growthRate}% de crecimiento mensual</div>
+                    </div>
+                    <div onClick={() => setShowProyeccion(false)} style={{ width: 36, height: 36, borderRadius: 10, background: T.bg, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", fontSize: 18, color: T.textMuted, fontWeight: 700, flexShrink: 0 }}>✕</div>
+                  </div>
+
+                  <div style={{ padding: "20px 32px 32px" }}>
+                    {/* Growth slider */}
+                    <div style={{ maxWidth: 400, marginBottom: 24 }}>
+                      <Slider label="Crecimiento mensual estimado" value={growthRate} onChange={setGrowthRate} min={0} max={15} step={0.5} formatVal={v => `${v}%`} />
+                    </div>
+
+                    {/* KPI row */}
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 12, marginBottom: 28 }}>
+                      <div style={{ padding: "16px", background: T.bg, borderRadius: 12, textAlign: "center" }}>
+                        <div style={{ fontSize: 10, color: T.textMuted, textTransform: "uppercase", fontWeight: 600 }}>Inversion total</div>
+                        <div style={{ fontSize: 20, fontWeight: 800, color: T.dark, marginTop: 4 }}>{fmt(totalInversion)}</div>
+                      </div>
+                      <div style={{ padding: "16px", background: T.greenLight, borderRadius: 12, textAlign: "center" }}>
+                        <div style={{ fontSize: 10, color: T.green, textTransform: "uppercase", fontWeight: 600 }}>Valor generado</div>
+                        <div style={{ fontSize: 20, fontWeight: 800, color: T.green, marginTop: 4 }}>{fmt(totalValor)}</div>
+                      </div>
+                      <div style={{ padding: "16px", background: T.greenLight, borderRadius: 12, textAlign: "center" }}>
+                        <div style={{ fontSize: 10, color: T.green, textTransform: "uppercase", fontWeight: 600 }}>ROI</div>
+                        <div style={{ fontSize: 20, fontWeight: 800, color: T.green, marginTop: 4 }}>{fmtPct(roi)}</div>
+                      </div>
+                      <div style={{ padding: "16px", background: T.greenLight, borderRadius: 12, textAlign: "center" }}>
+                        <div style={{ fontSize: 10, color: T.green, textTransform: "uppercase", fontWeight: 600 }}>Retorno</div>
+                        <div style={{ fontSize: 20, fontWeight: 800, color: T.green, marginTop: 4 }}>{roi > 0 ? `${Math.round(roi / 100)}:1` : "—"}</div>
+                        <div style={{ fontSize: 10, color: T.textMuted }}>por cada $1</div>
+                      </div>
+                    </div>
+
+                    {/* Chart grande */}
+                    <div style={{ marginBottom: 24 }}>
+                      <div style={{ display: "flex", gap: 12, marginBottom: 12 }}>
+                        <span style={{ fontSize: 11, color: T.textMuted, display: "flex", alignItems: "center", gap: 4 }}><span style={{ width: 10, height: 10, borderRadius: 2, background: T.green, display: "inline-block" }} /> Valor generado</span>
+                        <span style={{ fontSize: 11, color: T.textMuted, display: "flex", alignItems: "center", gap: 4 }}><span style={{ width: 10, height: 10, borderRadius: 2, background: T.border, display: "inline-block" }} /> Costo Mango</span>
+                      </div>
+                      <div style={{ display: "flex", gap: 4, alignItems: "flex-end", height: 180, padding: "0 4px" }}>
+                        {months.map((m, i) => {
+                          const hVal = maxBar > 0 ? (m.valorGenerado / maxBar) * 160 : 4;
+                          const hCost = maxBar > 0 ? (m.costoMango / maxBar) * 160 : 2;
+                          return (
+                            <div key={i} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "flex-end", height: "100%" }}>
+                              <div style={{ width: "100%", display: "flex", gap: 2, justifyContent: "center", alignItems: "flex-end", height: "100%" }}>
+                                <div style={{ width: "42%", height: Math.max(hVal, 3), background: T.green, borderRadius: "3px 3px 0 0", transition: "height 0.3s" }} />
+                                <div style={{ width: "42%", height: Math.max(hCost, 3), background: T.border, borderRadius: "3px 3px 0 0", transition: "height 0.3s" }} />
+                              </div>
+                              <div style={{ fontSize: 10, color: T.textMuted, marginTop: 4, fontWeight: 500 }}>{monthNames[i]}</div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    {/* Tabla detalle */}
+                    <div style={{ overflowX: "auto" }}>
+                      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+                        <thead>
+                          <tr style={{ borderBottom: `2px solid ${T.border}` }}>
+                            <th style={{ textAlign: "left", padding: "8px 10px", color: T.textMuted, fontWeight: 600, fontSize: 10, textTransform: "uppercase" }}>Mes</th>
+                            {proteccionEnabled && <th style={{ textAlign: "right", padding: "8px 10px", color: T.textMuted, fontWeight: 600, fontSize: 10, textTransform: "uppercase" }}>Venta Protegida</th>}
+                            {cobranzaEnabled && <th style={{ textAlign: "right", padding: "8px 10px", color: T.textMuted, fontWeight: 600, fontSize: 10, textTransform: "uppercase" }}>Recuperacion</th>}
+                            {calc.savings > 0 && <th style={{ textAlign: "right", padding: "8px 10px", color: T.textMuted, fontWeight: 600, fontSize: 10, textTransform: "uppercase" }}>Ahorro</th>}
+                            <th style={{ textAlign: "right", padding: "8px 10px", color: T.green, fontWeight: 700, fontSize: 10, textTransform: "uppercase" }}>Valor Total</th>
+                            <th style={{ textAlign: "right", padding: "8px 10px", color: T.textMuted, fontWeight: 600, fontSize: 10, textTransform: "uppercase" }}>Costo Mango</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {months.map((m, i) => (
+                            <tr key={i} style={{ borderBottom: `1px solid ${T.border}`, background: i === 0 ? T.primaryLight : i === 11 ? T.greenLight : "transparent" }}>
+                              <td style={{ padding: "7px 10px", fontWeight: 600, color: T.dark }}>{monthNames[i]}</td>
+                              {proteccionEnabled && <td style={{ padding: "7px 10px", textAlign: "right", color: T.text }}>{fmt(m.ventaProtegida)}</td>}
+                              {cobranzaEnabled && <td style={{ padding: "7px 10px", textAlign: "right", color: T.text }}>{fmt(m.cobranzaRec)}</td>}
+                              {calc.savings > 0 && <td style={{ padding: "7px 10px", textAlign: "right", color: T.text }}>{fmt(m.ahorroManual)}</td>}
+                              <td style={{ padding: "7px 10px", textAlign: "right", fontWeight: 700, color: T.green }}>{fmt(m.valorGenerado)}</td>
+                              <td style={{ padding: "7px 10px", textAlign: "right", color: T.textSecondary }}>{fmt(m.costoMango)}</td>
+                            </tr>
+                          ))}
+                          <tr style={{ borderTop: `2px solid ${T.dark}`, background: T.bg }}>
+                            <td style={{ padding: "10px 10px", fontWeight: 800, color: T.dark }}>Total 12m</td>
+                            {proteccionEnabled && <td style={{ padding: "10px 10px", textAlign: "right", fontWeight: 700, color: T.dark }}>{fmt(months.reduce((s, m) => s + m.ventaProtegida, 0))}</td>}
+                            {cobranzaEnabled && <td style={{ padding: "10px 10px", textAlign: "right", fontWeight: 700, color: T.dark }}>{fmt(months.reduce((s, m) => s + m.cobranzaRec, 0))}</td>}
+                            {calc.savings > 0 && <td style={{ padding: "10px 10px", textAlign: "right", fontWeight: 700, color: T.dark }}>{fmt(months.reduce((s, m) => s + m.ahorroManual, 0))}</td>}
+                            <td style={{ padding: "10px 10px", textAlign: "right", fontWeight: 800, color: T.green, fontSize: 14 }}>{fmt(totalValor)}</td>
+                            <td style={{ padding: "10px 10px", textAlign: "right", fontWeight: 700, color: T.textSecondary }}>{fmt(months.reduce((s, m) => s + m.costoMango, 0))}</td>
+                          </tr>
+                        </tbody>
+                      </table>
+                    </div>
+
+                    {/* Mes 1 → Mes 12 */}
+                    <div style={{ marginTop: 24, display: "flex", gap: 12, alignItems: "center" }}>
+                      <div style={{ flex: 1, padding: "14px 16px", background: T.bg, borderRadius: 10, textAlign: "center" }}>
+                        <div style={{ fontSize: 10, color: T.textMuted, textTransform: "uppercase", fontWeight: 600 }}>Mes 1</div>
+                        <div style={{ fontSize: 18, fontWeight: 800, color: T.dark, marginTop: 4 }}>{fmt(months[0].valorGenerado)}</div>
+                        <div style={{ fontSize: 11, color: T.textMuted }}>valor generado</div>
+                      </div>
+                      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke={T.green} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
+                      <div style={{ flex: 1, padding: "14px 16px", background: T.greenLight, borderRadius: 10, textAlign: "center", border: `2px solid ${T.green}` }}>
+                        <div style={{ fontSize: 10, color: T.green, textTransform: "uppercase", fontWeight: 700 }}>Mes 12</div>
+                        <div style={{ fontSize: 18, fontWeight: 800, color: T.green, marginTop: 4 }}>{fmt(months[11].valorGenerado)}</div>
+                        <div style={{ fontSize: 11, color: T.textSecondary }}>+{Math.round((months[11].valorGenerado / Math.max(months[0].valorGenerado, 1) - 1) * 100)}% crecimiento</div>
+                      </div>
+                    </div>
+
+                    {/* ===== MORA — Sin Mango vs Con Mango ===== */}
+                    <div style={{ marginTop: 28, padding: "24px", background: T.redBg, borderRadius: 12, border: `1px solid ${T.red}22` }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 16 }}>
+                        <div>
+                          <div style={{ fontSize: 10, fontWeight: 700, color: T.red, letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 4 }}>¿Y si no tuvieras Mango?</div>
+                          <div style={{ fontSize: 16, fontWeight: 800, color: T.dark }}>Lo que te cuesta vender a credito sin proteccion</div>
+                        </div>
+                      </div>
+
+                      <div style={{ maxWidth: 340, marginBottom: 20 }}>
+                        <Slider label="Tasa de mora estimada (% de venta perdida)" value={moraRate} onChange={setMoraRate} min={1} max={20} step={0.5} formatVal={v => `${v}%`} />
+                      </div>
+
+                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 16 }}>
+                        {/* Sin Mango */}
+                        <div style={{ padding: "20px", background: T.surface, borderRadius: 10, border: `2px solid ${T.red}33` }}>
+                          <div style={{ fontSize: 10, fontWeight: 700, color: T.red, letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 12 }}>Sin Mango (12 meses)</div>
+                          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
+                            <span style={{ fontSize: 12, color: T.textSecondary }}>Perdida por mora ({moraRate}%)</span>
+                            <span style={{ fontSize: 12, fontWeight: 700, color: T.red }}>{fmt(perdidaMora)}</span>
+                          </div>
+                          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
+                            <span style={{ fontSize: 12, color: T.textSecondary }}>Venta no cerrada sin credito ({ventaPerdidaPct}%)</span>
+                            <span style={{ fontSize: 12, fontWeight: 700, color: T.red }}>{fmt(ventaPerdida)}</span>
+                          </div>
+                          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
+                            <span style={{ fontSize: 12, color: T.textSecondary }}>Conciliacion manual (nomina)</span>
+                            <span style={{ fontSize: 12, fontWeight: 600, color: T.dark }}>{fmt(calc.manualCost * 12)}</span>
+                          </div>
+                          <div style={{ borderTop: `2px solid ${T.red}`, paddingTop: 8, marginTop: 4, display: "flex", justifyContent: "space-between" }}>
+                            <span style={{ fontSize: 13, fontWeight: 800, color: T.red }}>Costo total</span>
+                            <span style={{ fontSize: 16, fontWeight: 800, color: T.red }}>{fmt(costoSinMango)}</span>
+                          </div>
+                        </div>
+
+                        {/* Con Mango */}
+                        <div style={{ padding: "20px", background: T.surface, borderRadius: 10, border: `2px solid ${T.green}` }}>
+                          <div style={{ fontSize: 10, fontWeight: 700, color: T.green, letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 12 }}>Con Mango (12 meses)</div>
+                          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
+                            <span style={{ fontSize: 12, color: T.textSecondary }}>Perdida por mora</span>
+                            <span style={{ fontSize: 12, fontWeight: 700, color: T.green }}>$0 — protegido</span>
+                          </div>
+                          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
+                            <span style={{ fontSize: 12, color: T.textSecondary }}>Venta adicional con credito</span>
+                            <span style={{ fontSize: 12, fontWeight: 700, color: T.green }}>{fmt(ventaPerdida)}</span>
+                          </div>
+                          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
+                            <span style={{ fontSize: 12, color: T.textSecondary }}>Conciliacion</span>
+                            <span style={{ fontSize: 12, fontWeight: 700, color: T.green }}>Automatizada</span>
+                          </div>
+                          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
+                            <span style={{ fontSize: 12, color: T.textSecondary }}>Inversion Mango</span>
+                            <span style={{ fontSize: 12, fontWeight: 600, color: T.dark }}>{fmt(costoConMango)}</span>
+                          </div>
+                          <div style={{ borderTop: `2px solid ${T.green}`, paddingTop: 8, marginTop: 4, display: "flex", justifyContent: "space-between" }}>
+                            <span style={{ fontSize: 13, fontWeight: 800, color: T.green }}>Costo total</span>
+                            <span style={{ fontSize: 16, fontWeight: 800, color: T.green }}>{fmt(costoConMango)}</span>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Resultado */}
+                      {beneficioNeto > 0 && (
+                        <div style={{ padding: "16px 20px", background: T.greenLight, borderRadius: 10, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                          <div>
+                            <div style={{ fontSize: 14, fontWeight: 800, color: T.green }}>Beneficio neto: {fmt(beneficioNeto)} en 12 meses</div>
+                            <div style={{ fontSize: 12, color: T.textSecondary, marginTop: 2 }}>Proteges tu cartera, vendes mas a credito y eliminas costos operativos</div>
+                          </div>
+                          <div style={{ fontSize: 28, fontWeight: 800, color: T.green }}>{Math.round(costoSinMango / Math.max(costoConMango, 1))}x</div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
+
+          {/* ======= MODAL PROPUESTA COMERCIAL ======= */}
+          {showPropuesta && (() => {
+            const meses = ["enero","febrero","marzo","abril","mayo","junio","julio","agosto","septiembre","octubre","noviembre","diciembre"];
+            const hoy = new Date();
+            const fechaHoy = `${hoy.getDate()} de ${meses[hoy.getMonth()]}, ${hoy.getFullYear()}`;
+            const inputStyle = { padding: "10px 14px", border: `1px solid ${T.borderInput}`, borderRadius: 8, fontSize: 14, fontFamily: "inherit", width: "100%", outline: "none", boxSizing: "border-box" };
+            const formValid = propuestaData.empresa.trim() && propuestaData.contacto.trim() && propuestaData.email.trim();
+
+            const handleGmail = () => {
+              const subject = encodeURIComponent(`Propuesta Comercial Mango – ${propuestaData.empresa}`);
+              const body = encodeURIComponent(`Estimado/a ${propuestaData.contacto},\n\nAdjunto encontrará la propuesta comercial de Mango para ${propuestaData.empresa}, así como un resumen ejecutivo con la proyección de valor y beneficios de la alianza.\n\nQuedamos a sus órdenes para resolver cualquier duda y avanzar con los siguientes pasos.\n\nSaludos cordiales,\nLuis Eduardo Morales Gutiérrez\nDirector Comercial\nMango/Tecnologías Morales Angelini S.A.P.I. de C.V.`);
+              window.open(`https://mail.google.com/mail/?view=cm&to=${propuestaData.email}&su=${subject}&body=${body}`, "_blank");
+              setPropuestaStep("sent");
+            };
+
+            const downloadPDF = (elementIds, filename) => {
+              const ids = Array.isArray(elementIds) ? elementIds : [elementIds];
+              const baseUrl = window.location.href.replace(/\/[^\/]*$/, '/');
+              const win = window.open("", "_blank");
+              if (!win) { alert("Permite pop-ups para descargar el PDF"); return; }
+              let html = `<!DOCTYPE html><html><head>
+                <meta charset="UTF-8">
+                <base href="${baseUrl}">
+                <link href="https://fonts.googleapis.com/css2?family=Open+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+                <style>
+                  * { margin:0; padding:0; box-sizing:border-box; }
+                  body { font-family:'Open Sans',sans-serif; background:#fff; color:#000; padding:32px 40px; -webkit-print-color-adjust:exact; print-color-adjust:exact; color-adjust:exact; }
+                  img { max-width:100%; }
+                  .pdf-section { page-break-inside:avoid; break-inside:avoid; }
+                  .doc-break { page-break-before:always; break-before:page; padding-top:32px; }
+                  @media print {
+                    body { padding:20px 28px; }
+                    @page { margin:10mm 12mm; size:A4; }
+                    .pdf-section { page-break-inside:avoid; break-inside:avoid; }
+                  }
+                </style>
+              </head><body>`;
+              ids.forEach((id, i) => {
+                const el = document.getElementById(id);
+                if (!el) return;
+                const clone = el.cloneNode(true);
+                clone.style.maxWidth = "100%";
+                clone.style.margin = "0";
+                clone.style.padding = i === 0 ? "0" : "0";
+                clone.style.boxShadow = "none";
+                clone.style.borderRadius = "0";
+                clone.style.background = "#fff";
+                if (i > 0) {
+                  html += '<div class="doc-break">';
+                }
+                html += clone.outerHTML;
+                if (i > 0) {
+                  html += '</div>';
+                }
+              });
+              html += `<script>
+                document.title = "${filename.replace('.pdf','')}";
+                // Esperar a que carguen fonts e imagenes
+                setTimeout(function(){ window.print(); }, 800);
+              <\/script></body></html>`;
+              win.document.write(html);
+              win.document.close();
+            };
+
+            return (
+              <div style={{ position: "fixed", inset: 0, zIndex: 999, background: "rgba(0,0,0,0.6)", display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }}
+                onClick={e => { if (e.target === e.currentTarget) setShowPropuesta(false); }}>
+                <div style={{ background: T.bg, borderRadius: 20, width: "100%", maxWidth: propuestaStep === "preview" ? 820 : propuestaStep === "sent" ? 600 : 540, maxHeight: "92vh", overflow: "auto", boxShadow: "0 24px 80px rgba(0,0,0,0.25)", display: "flex", flexDirection: "column" }}>
+
+                  {/* === STEP: FORM === */}
+                  {propuestaStep === "form" && (
+                    <div style={{ padding: "32px" }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 28 }}>
+                        <div>
+                          <div style={{ fontSize: 10, fontWeight: 700, color: T.primary, letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 4 }}>Propuesta Comercial</div>
+                          <div style={{ fontSize: 22, fontWeight: 800, color: T.dark }}>Datos del Cliente</div>
+                          <div style={{ fontSize: 13, color: T.textSecondary, marginTop: 4 }}>Completa la información para generar la propuesta</div>
+                        </div>
+                        <div onClick={() => setShowPropuesta(false)} style={{ width: 36, height: 36, borderRadius: 10, background: T.surface, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", fontSize: 18, color: T.textMuted, fontWeight: 700, flexShrink: 0, border: `1px solid ${T.border}` }}>✕</div>
+                      </div>
+
+                      <div style={{ background: T.surface, borderRadius: 12, padding: 24, border: `1px solid ${T.border}` }}>
+                        <div style={{ marginBottom: 16 }}>
+                          <label style={{ display: "block", fontSize: 12, fontWeight: 600, color: T.textSecondary, marginBottom: 6 }}>Empresa *</label>
+                          <input type="text" placeholder="CONCRETOS LA SILLA" value={propuestaData.empresa} onChange={e => setPropuestaData({...propuestaData, empresa: e.target.value})} style={inputStyle} />
+                        </div>
+                        <div style={{ marginBottom: 16 }}>
+                          <label style={{ display: "block", fontSize: 12, fontWeight: 600, color: T.textSecondary, marginBottom: 6 }}>Contacto *</label>
+                          <input type="text" placeholder="Calixto Salinas" value={propuestaData.contacto} onChange={e => setPropuestaData({...propuestaData, contacto: e.target.value})} style={inputStyle} />
+                        </div>
+                        <div style={{ marginBottom: 16 }}>
+                          <label style={{ display: "block", fontSize: 12, fontWeight: 600, color: T.textSecondary, marginBottom: 6 }}>Cargo</label>
+                          <input type="text" placeholder="Director Comercial" value={propuestaData.cargo} onChange={e => setPropuestaData({...propuestaData, cargo: e.target.value})} style={inputStyle} />
+                        </div>
+                        <div style={{ marginBottom: 16 }}>
+                          <label style={{ display: "block", fontSize: 12, fontWeight: 600, color: T.textSecondary, marginBottom: 6 }}>Email para firma *</label>
+                          <input type="email" placeholder="calixto@concretoslasilla.com" value={propuestaData.email} onChange={e => setPropuestaData({...propuestaData, email: e.target.value})} style={inputStyle} />
+                        </div>
+                        <div style={{ marginBottom: 8 }}>
+                          <label style={{ display: "block", fontSize: 12, fontWeight: 600, color: T.textSecondary, marginBottom: 6 }}>Vigencia (días)</label>
+                          <input type="number" value={propuestaData.vigencia} onChange={e => setPropuestaData({...propuestaData, vigencia: Math.max(1, Number(e.target.value))})} style={{...inputStyle, width: 100}} />
+                        </div>
+                      </div>
+
+                      <div style={{ marginTop: 24, display: "flex", justifyContent: "flex-end" }}>
+                        <button onClick={() => formValid && setPropuestaStep("preview")} disabled={!formValid}
+                          style={{ padding: "12px 28px", background: formValid ? T.primary : T.border, color: formValid ? T.dark : T.textMuted, border: "none", borderRadius: T.radiusButton, fontSize: 14, fontWeight: 700, cursor: formValid ? "pointer" : "not-allowed", fontFamily: "inherit", transition: "all 0.2s" }}>
+                          Vista Previa
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* === STEP: PREVIEW (also rendered off-screen in "sent" for PDF access) === */}
+                  {(propuestaStep === "preview" || propuestaStep === "sent") && (
+                    <div style={propuestaStep === "preview" ? { display: "flex", flexDirection: "column", height: "100%", maxHeight: "92vh" } : { position: "absolute", left: -9999, top: 0, width: 720 }}>
+                      {/* Document preview area */}
+                      <div style={{ flex: 1, overflow: "auto", padding: "32px", background: T.bg }}>
+                        <div id="propuesta-pdf" style={{ maxWidth: 720, margin: "0 auto", background: T.surface, borderRadius: 4, padding: "24px 28px", boxShadow: "0 2px 20px rgba(0,0,0,0.08)", fontFamily: "'Open Sans', sans-serif", lineHeight: 1.6, color: T.text }}>
+
+                          {/* Page 1 — Header */}
+                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 16 }}>
+                            <div>
+                              <div style={{ fontSize: 18, fontWeight: 800, color: T.dark, letterSpacing: "0.02em" }}>PROPUESTA COMERCIAL</div>
+                              <div style={{ fontSize: 15, fontStyle: "italic", color: T.textSecondary, marginTop: 6 }}>Mango – {propuestaData.empresa}</div>
+                              <div style={{ fontSize: 13, color: T.textSecondary, marginTop: 4 }}>Con atención a {propuestaData.contacto}{propuestaData.cargo ? ` — ${propuestaData.cargo}` : ""}</div>
+                            </div>
+                            <img src="mango-isotipo.png" alt="Mango" style={{ width: 52, height: 52, objectFit: "contain", flexShrink: 0 }} />
+                          </div>
+
+                          <div style={{ borderTop: `1px solid ${T.border}`, marginBottom: 14 }} />
+
+                          {/* Intro paragraph */}
+                          <p style={{ fontSize: 12, color: T.text, marginBottom: 16 }}>
+                            Estimado/a {propuestaData.contacto}, es un gusto presentarle la siguiente propuesta comercial en la que describimos cómo {propuestaData.empresa} puede integrarse a la red Mango y beneficiarse de nuestra infraestructura financiera diseñada específicamente para la industria de materiales de construcción en México. Nuestro objetivo es que su empresa venda más, cobre mejor y opere con total visibilidad.
+                          </p>
+
+                          {/* Services */}
+                          <div style={{ fontSize: 13, fontWeight: 700, color: T.dark, marginBottom: 10 }}>Servicios proporcionados por Mango</div>
+
+                          {(() => {
+                            const services = [];
+                            let n = 1;
+                            services.push({ num: n++, title: "Acceso preferente a una red de constructores activos", desc: `${propuestaData.empresa} tendrá acceso a una base de constructores verificados por Mango, con historial crediticio evaluado y líneas de crédito preaprobadas. Esto permite ampliar su cartera de clientes con menor riesgo.` });
+                            if (proteccionEnabled) {
+                              services.push({ num: n++, title: "Cobertura total del riesgo de crédito", desc: `Mango garantiza el pago de cada transacción realizada a través de la red. En caso de incumplimiento del constructor, Mango absorbe la pérdida y paga al proveedor en un máximo de 3 días hábiles. Usted vende a crédito sin asumir ningún riesgo.` });
+                            }
+                            if (conciliacionEnabled || plataformaEnabled) {
+                              services.push({ num: n++, title: "Plataforma digital integral para la gestión comercial", desc: "Acceso a un portal web donde podrá consultar en tiempo real el estatus de cada factura, pago y cliente. Incluye conciliación automática de pagos contra facturas SAT, reportes de aging, alertas de deterioro y exportación a Excel." });
+                            }
+                            services.push({ num: n++, title: "Acompañamiento personalizado", desc: "Un ejecutivo de cuenta dedicado para resolver dudas, optimizar su operación dentro de la red y asegurar que obtenga el máximo valor de cada servicio contratado." });
+                            if (almaEnabled) {
+                              services.push({ num: n++, title: `ALMA — Asistente de inteligencia artificial para su cartera`, desc: `Acceso al plan ${calc.almaPackInfo.label} (${calc.almaPackInfo.queries} consultas/mes). Pregunte sobre su cartera en lenguaje natural: quién le debe, qué se vence, cómo va la cobranza. Respuestas en segundos con datos reales de su operación.` });
+                            }
+                            if (cobranzaEnabled) {
+                              services.push({ num: n++, title: "Gestión activa de cobranza con modelo de éxito", desc: `Mango gestiona su cartera vencida de forma profesional. Solo paga por lo que se recupera: ${cobranzaRate}% sobre la cartera efectivamente cobrada.` });
+                            }
+                            return services.map(s => (
+                              <div key={s.num} style={{ marginBottom: 10, display: "flex", gap: 10 }}>
+                                <div style={{ width: 20, height: 20, borderRadius: 10, background: T.primaryLight, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 10, fontWeight: 800, color: T.dark, flexShrink: 0, marginTop: 2 }}>{s.num}</div>
+                                <div>
+                                  <div style={{ fontSize: 12, fontWeight: 700, color: T.dark }}>{s.title}</div>
+                                  <div style={{ fontSize: 11, color: T.textSecondary, marginTop: 1, lineHeight: 1.5 }}>{s.desc}</div>
+                                </div>
+                              </div>
+                            ));
+                          })()}
+
+                          {/* Separator between pages */}
+                          <div style={{ borderTop: `2px solid ${T.border}`, margin: "18px 0" }} />
+
+                          {/* Page 2 — Commercial conditions */}
+                          <div className="pdf-section" style={{ fontSize: 13, fontWeight: 700, color: T.dark, marginBottom: 10 }}>Condiciones comerciales</div>
+
+                          <div className="pdf-section" style={{ marginBottom: 16 }}>
+                            {proteccionEnabled && (
+                              <div style={{ marginBottom: 8, padding: "8px 12px", background: T.bg, borderRadius: 6, borderLeft: `3px solid ${T.primary}` }}>
+                                <div style={{ fontSize: 12, fontWeight: 700, color: T.dark }}>Comisión por transacción protegida</div>
+                                <div style={{ fontSize: 12, color: T.textSecondary, marginTop: 4 }}>{calc.proteccionRate.toFixed(1)}% + IVA sobre el monto total de cada venta realizada a través de la red Mango. Esta comisión se factura mensualmente con base en las transacciones procesadas durante el periodo.</div>
+                              </div>
+                            )}
+                            {proteccionEnabled && (
+                              <div style={{ marginBottom: 8, padding: "8px 12px", background: T.bg, borderRadius: 6, borderLeft: `3px solid ${T.primary}` }}>
+                                <div style={{ fontSize: 12, fontWeight: 700, color: T.dark }}>Suscripción anual</div>
+                                <div style={{ fontSize: 12, color: T.textSecondary, marginTop: 4 }}>Pago en una sola exhibición: {fmt(proteccionFeeAnual)} + IVA. Cubre la habilitación de la infraestructura de protección de pagos por un periodo de 12 meses.</div>
+                              </div>
+                            )}
+                            {conciliacionEnabled && (
+                              <div style={{ marginBottom: 8, padding: "8px 12px", background: T.bg, borderRadius: 6, borderLeft: `3px solid ${T.orange}` }}>
+                                <div style={{ fontSize: 12, fontWeight: 700, color: T.dark }}>Servicio de conciliación</div>
+                                <div style={{ fontSize: 12, color: T.textSecondary, marginTop: 4 }}>{fmt(calc.conciliationTotal)}/mes + IVA ({calc.unprotectedTxns.toLocaleString()} transacciones estimadas a {fmt(calc.conciliationPrice)}/tx)</div>
+                              </div>
+                            )}
+                            {plataformaEnabled && conciliacionEnabled && (
+                              <div style={{ marginBottom: 8, padding: "8px 12px", background: T.bg, borderRadius: 6, borderLeft: `3px solid ${T.blue}` }}>
+                                <div style={{ fontSize: 12, fontWeight: 700, color: T.dark }}>Plataforma digital</div>
+                                <div style={{ fontSize: 12, color: T.textSecondary, marginTop: 4 }}>{seatsBasico} usuario{seatsBasico !== 1 ? "s" : ""} Básico + {seatsPro} usuario{seatsPro !== 1 ? "s" : ""} Pro + {seatsBusiness} usuario{seatsBusiness !== 1 ? "s" : ""} Business = {fmt(calc.totalSeatsCost)}/mes + IVA</div>
+                              </div>
+                            )}
+                            {almaEnabled && (
+                              <div style={{ marginBottom: 8, padding: "8px 12px", background: T.bg, borderRadius: 6, borderLeft: `3px solid ${T.purple}` }}>
+                                <div style={{ fontSize: 12, fontWeight: 700, color: T.dark }}>ALMA {calc.almaPackInfo.label}</div>
+                                <div style={{ fontSize: 12, color: T.textSecondary, marginTop: 4 }}>{fmt(calc.almaCost)}/mes + IVA ({calc.almaPackInfo.queries} consultas mensuales)</div>
+                              </div>
+                            )}
+                            {cobranzaEnabled && (
+                              <div style={{ marginBottom: 8, padding: "8px 12px", background: T.bg, borderRadius: 6, borderLeft: `3px solid ${T.green}` }}>
+                                <div style={{ fontSize: 12, fontWeight: 700, color: T.dark }}>Gestión de cobranza</div>
+                                <div style={{ fontSize: 12, color: T.textSecondary, marginTop: 4 }}>{cobranzaRate}% sobre cartera efectivamente recuperada + IVA. Sin costo fijo mensual.</div>
+                              </div>
+                            )}
+                          </div>
+
+                          {/* Validity + Closing + Signature — keep together */}
+                          <div className="pdf-section">
+                            <div style={{ borderTop: `1px solid ${T.border}`, marginBottom: 14 }} />
+
+                            <p style={{ fontSize: 11, color: T.textSecondary, marginBottom: 12 }}>
+                              La presente propuesta tiene una vigencia de <strong>{propuestaData.vigencia} días naturales</strong> a partir de la fecha de emisión.
+                            </p>
+
+                            <p style={{ fontSize: 11, color: T.textSecondary, marginBottom: 18 }}>
+                              Estamos convencidos de que esta alianza generará un valor significativo para {propuestaData.empresa}. Quedamos a su entera disposición para resolver cualquier duda y avanzar con los siguientes pasos.
+                            </p>
+
+                            <div style={{ marginBottom: 20 }}>
+                              <div style={{ fontSize: 11, color: T.textSecondary, marginBottom: 6 }}>Atentamente,</div>
+                              <div style={{ fontSize: 13, fontWeight: 800, color: T.dark }}>Luis Eduardo Morales Gutiérrez</div>
+                              <div style={{ fontSize: 11, color: T.textSecondary }}>Director Comercial</div>
+                            </div>
+                          </div>
+
+                          {/* Footer */}
+                          <div style={{ borderTop: `1px solid ${T.border}`, paddingTop: 10, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                            <div style={{ fontSize: 10, color: T.textMuted }}>Mango / Tecnologías Morales Angelini S.A.P.I. de C.V.</div>
+                            <div style={{ fontSize: 10, color: T.textMuted }}>{fechaHoy}</div>
+                          </div>
+                        </div>
+
+                        {/* ===== BROCHURE — hidden, for PDF generation ===== */}
+                        <div id="brochure-pdf" style={{ maxWidth: 720, margin: "32px auto 0", background: T.surface, borderRadius: 4, padding: "24px 28px", boxShadow: "0 2px 20px rgba(0,0,0,0.08)", fontFamily: "'Open Sans', sans-serif", lineHeight: 1.6, color: T.text }}>
+
+                          {/* Header */}
+                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 14 }}>
+                            <div>
+                              <div style={{ fontSize: 9, fontWeight: 700, color: T.primary, letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 3 }}>Resumen Ejecutivo</div>
+                              <div style={{ fontSize: 17, fontWeight: 800, color: T.dark }}>Beneficios de tu Alianza con Mango</div>
+                              <div style={{ fontSize: 11, color: T.textSecondary, marginTop: 3 }}>{propuestaData.empresa} · {fechaHoy}</div>
+                            </div>
+                            <img src="mango-isotipo.png" alt="Mango" style={{ width: 48, height: 48, objectFit: "contain", flexShrink: 0 }} />
+                          </div>
+
+                          <div style={{ borderTop: `1px solid ${T.border}`, marginBottom: 14 }} />
+
+                          {/* Qué incluye tu plan — tarifas, no montos */}
+                          <div style={{ fontSize: 13, fontWeight: 700, color: T.dark, marginBottom: 8 }}>¿Qué incluye tu plan?</div>
+                          <div style={{ marginBottom: 16 }}>
+                            {proteccionEnabled && (
+                              <div style={{ display: "flex", justifyContent: "space-between", padding: "7px 0", borderBottom: `1px solid ${T.border}` }}>
+                                <div>
+                                  <span style={{ fontSize: 12, fontWeight: 600, color: T.dark }}>Protección de Pagos</span>
+                                  <span style={{ fontSize: 11, color: T.textSecondary, marginLeft: 8 }}>Mango garantiza el cobro de cada venta</span>
+                                </div>
+                                <span style={{ fontSize: 12, fontWeight: 700, color: T.dark, whiteSpace: "nowrap" }}>{calc.proteccionRate.toFixed(1)}% + IVA por transacción</span>
+                              </div>
+                            )}
+                            {proteccionEnabled && calc.totalPagosAnuales > 0 && (
+                              <div style={{ display: "flex", justifyContent: "space-between", padding: "7px 0", borderBottom: `1px solid ${T.border}` }}>
+                                <div>
+                                  <span style={{ fontSize: 12, fontWeight: 600, color: T.primary }}>Fee de habilitación</span>
+                                  <span style={{ fontSize: 11, color: T.textSecondary, marginLeft: 8 }}>Pago único anual</span>
+                                </div>
+                                <span style={{ fontSize: 12, fontWeight: 700, color: T.dark }}>{fmt(calc.totalPagosAnuales)} + IVA</span>
+                              </div>
+                            )}
+                            {conciliacionEnabled && (
+                              <div style={{ display: "flex", justifyContent: "space-between", padding: "7px 0", borderBottom: `1px solid ${T.border}` }}>
+                                <div>
+                                  <span style={{ fontSize: 12, fontWeight: 600, color: T.dark }}>Conciliación Automática</span>
+                                  <span style={{ fontSize: 11, color: T.textSecondary, marginLeft: 8 }}>Match pagos vs facturas SAT</span>
+                                </div>
+                                <span style={{ fontSize: 12, fontWeight: 700, color: T.dark, whiteSpace: "nowrap" }}>{fmt(calc.conciliationPrice)}/txn + IVA</span>
+                              </div>
+                            )}
+                            {plataformaEnabled && conciliacionEnabled && (
+                              <div style={{ display: "flex", justifyContent: "space-between", padding: "7px 0", borderBottom: `1px solid ${T.border}` }}>
+                                <div>
+                                  <span style={{ fontSize: 12, fontWeight: 600, color: T.dark }}>Plataforma Digital</span>
+                                  <span style={{ fontSize: 11, color: T.textSecondary, marginLeft: 8 }}>{calc.totalSeats} usuarios</span>
+                                </div>
+                                <span style={{ fontSize: 12, fontWeight: 700, color: T.dark }}>{fmt(calc.totalSeatsCost)}/mes + IVA</span>
+                              </div>
+                            )}
+                            {almaEnabled && (
+                              <div style={{ display: "flex", justifyContent: "space-between", padding: "7px 0", borderBottom: `1px solid ${T.border}` }}>
+                                <div>
+                                  <span style={{ fontSize: 12, fontWeight: 600, color: T.dark }}>ALMA {calc.almaPackInfo.label}</span>
+                                  <span style={{ fontSize: 11, color: T.textSecondary, marginLeft: 8 }}>{calc.almaPackInfo.queries} consultas/mes</span>
+                                </div>
+                                <span style={{ fontSize: 12, fontWeight: 700, color: T.dark }}>{fmt(calc.almaCost)}/mes + IVA</span>
+                              </div>
+                            )}
+                            {cobranzaEnabled && (
+                              <div style={{ display: "flex", justifyContent: "space-between", padding: "7px 0", borderBottom: `1px solid ${T.border}` }}>
+                                <div>
+                                  <span style={{ fontSize: 12, fontWeight: 600, color: T.dark }}>Gestión de Cobranza</span>
+                                  <span style={{ fontSize: 11, color: T.textSecondary, marginLeft: 8 }}>Solo pagas por resultados</span>
+                                </div>
+                                <span style={{ fontSize: 12, fontWeight: 700, color: T.dark }}>{cobranzaRate}% sobre recuperado + IVA</span>
+                              </div>
+                            )}
+                          </div>
+
+                          <div style={{ fontSize: 10, color: T.textMuted, fontStyle: "italic", marginBottom: 16 }}>Los costos variables dependen del volumen de operación. A continuación una simulación basada en tu volumen estimado.</div>
+
+                          <div style={{ borderTop: `1px solid ${T.border}`, marginBottom: 14 }} />
+
+                          {/* Proyección 12 meses */}
+                          {(() => {
+                            const bMonths = [];
+                            for (let m = 1; m <= 12; m++) {
+                              const g = Math.pow(1 + growthRate / 100, m - 1);
+                              const vp = proteccionEnabled ? calc.proteccionMontoReal * g : 0;
+                              const cr = cobranzaEnabled ? calc.cobranzaRecovered * g : 0;
+                              const sv = calc.savings > 0 ? calc.savings : 0;
+                              const val = vp + cr + sv;
+                              const cost = calc.totalMensual + (m === 1 ? calc.totalPagosAnuales : 0);
+                              bMonths.push({ vp, val, cost });
+                            }
+                            const totalInv = bMonths.reduce((s, m) => s + m.cost, 0);
+                            const totalVal = bMonths.reduce((s, m) => s + m.val, 0);
+                            const bRoi = totalInv > 0 ? ((totalVal - totalInv) / totalInv * 100) : 0;
+                            const ventaAnual = bMonths.reduce((s, m) => s + m.vp, 0);
+                            const perdidaMora = ventaAnual * (moraRate / 100);
+                            const ventaPerdida = ventaAnual * 0.15;
+                            const costoSinM = perdidaMora + ventaPerdida + (calc.manualCost * 12);
+
+                            return (
+                              <div>
+                                <div style={{ fontSize: 13, fontWeight: 700, color: T.dark, marginBottom: 8 }}>Proyección a 12 meses ({growthRate}% crecimiento mensual)</div>
+
+                                {/* KPI row */}
+                                <div className="pdf-section" style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 6, marginBottom: 14 }}>
+                                  <div style={{ padding: "8px 6px", background: T.bg, borderRadius: 6, textAlign: "center" }}>
+                                    <div style={{ fontSize: 8, color: T.textMuted, textTransform: "uppercase", fontWeight: 600 }}>Inversión 12m</div>
+                                    <div style={{ fontSize: 13, fontWeight: 800, color: T.dark, marginTop: 2 }}>{fmt(totalInv)}</div>
+                                  </div>
+                                  <div style={{ padding: "8px 6px", background: T.greenLight, borderRadius: 6, textAlign: "center" }}>
+                                    <div style={{ fontSize: 8, color: T.green, textTransform: "uppercase", fontWeight: 600 }}>Valor generado</div>
+                                    <div style={{ fontSize: 13, fontWeight: 800, color: T.green, marginTop: 2 }}>{fmt(totalVal)}</div>
+                                  </div>
+                                  <div style={{ padding: "8px 6px", background: T.greenLight, borderRadius: 6, textAlign: "center" }}>
+                                    <div style={{ fontSize: 8, color: T.green, textTransform: "uppercase", fontWeight: 600 }}>ROI</div>
+                                    <div style={{ fontSize: 13, fontWeight: 800, color: T.green, marginTop: 2 }}>{Math.round(bRoi)}%</div>
+                                  </div>
+                                  <div style={{ padding: "8px 6px", background: T.greenLight, borderRadius: 6, textAlign: "center" }}>
+                                    <div style={{ fontSize: 8, color: T.green, textTransform: "uppercase", fontWeight: 600 }}>Retorno</div>
+                                    <div style={{ fontSize: 13, fontWeight: 800, color: T.green, marginTop: 2 }}>{bRoi > 0 ? `${Math.round(bRoi / 100)}:1` : "—"}</div>
+                                  </div>
+                                </div>
+
+                                {/* Simple bar chart */}
+                                <div style={{ display: "flex", gap: 3, alignItems: "flex-end", height: 80, marginBottom: 6 }}>
+                                  {bMonths.map((m, i) => {
+                                    const maxB = Math.max(...bMonths.map(x => Math.max(x.val, x.cost)));
+                                    const hV = maxB > 0 ? (m.val / maxB) * 85 : 3;
+                                    const hC = maxB > 0 ? (m.cost / maxB) * 85 : 2;
+                                    return (
+                                      <div key={i} style={{ flex: 1, display: "flex", gap: 1, alignItems: "flex-end", height: "100%" }}>
+                                        <div style={{ width: "48%", height: Math.max(hV, 2), background: T.green, borderRadius: "2px 2px 0 0" }} />
+                                        <div style={{ width: "48%", height: Math.max(hC, 2), background: T.border, borderRadius: "2px 2px 0 0" }} />
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                                <div style={{ display: "flex", gap: 12, marginBottom: 24 }}>
+                                  <span style={{ fontSize: 10, color: T.textMuted, display: "flex", alignItems: "center", gap: 4 }}><span style={{ width: 8, height: 8, borderRadius: 2, background: T.green, display: "inline-block" }} /> Valor</span>
+                                  <span style={{ fontSize: 10, color: T.textMuted, display: "flex", alignItems: "center", gap: 4 }}><span style={{ width: 8, height: 8, borderRadius: 2, background: T.border, display: "inline-block" }} /> Costo</span>
+                                </div>
+
+                                {/* Comparativo Sin Mango vs Con Mango */}
+                                <div className="pdf-section">
+                                <div style={{ fontSize: 13, fontWeight: 700, color: T.dark, marginBottom: 8 }}>¿Cuánto cuesta NO tener Mango?</div>
+                                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 14 }}>
+                                  <div style={{ padding: 12, background: T.redBg, borderRadius: 6, border: `1px solid ${T.red}22` }}>
+                                    <div style={{ fontSize: 10, fontWeight: 700, color: T.red, textTransform: "uppercase", marginBottom: 8 }}>Sin Mango (12m)</div>
+                                    <div style={{ fontSize: 11, color: T.textSecondary, marginBottom: 4 }}>Pérdida por mora ({moraRate}%): <strong style={{ color: T.red }}>{fmt(perdidaMora)}</strong></div>
+                                    <div style={{ fontSize: 11, color: T.textSecondary, marginBottom: 4 }}>Venta no cerrada sin crédito: <strong style={{ color: T.red }}>{fmt(ventaPerdida)}</strong></div>
+                                    <div style={{ fontSize: 11, color: T.textSecondary, marginBottom: 8 }}>Conciliación manual: <strong>{fmt(calc.manualCost * 12)}</strong></div>
+                                    <div style={{ borderTop: `1px solid ${T.red}44`, paddingTop: 6 }}>
+                                      <span style={{ fontSize: 13, fontWeight: 800, color: T.red }}>Total: {fmt(costoSinM)}</span>
+                                    </div>
+                                  </div>
+                                  <div style={{ padding: 12, background: T.greenLight, borderRadius: 6, border: `1px solid ${T.green}33` }}>
+                                    <div style={{ fontSize: 10, fontWeight: 700, color: T.green, textTransform: "uppercase", marginBottom: 8 }}>Con Mango (12m)</div>
+                                    <div style={{ fontSize: 11, color: T.textSecondary, marginBottom: 4 }}>Mora: <strong style={{ color: T.green }}>$0 — protegido</strong></div>
+                                    <div style={{ fontSize: 11, color: T.textSecondary, marginBottom: 4 }}>Venta adicional con crédito: <strong style={{ color: T.green }}>{fmt(ventaPerdida)}</strong></div>
+                                    <div style={{ fontSize: 11, color: T.textSecondary, marginBottom: 8 }}>Conciliación: <strong style={{ color: T.green }}>Automatizada</strong></div>
+                                    <div style={{ borderTop: `1px solid ${T.green}44`, paddingTop: 6 }}>
+                                      <span style={{ fontSize: 13, fontWeight: 800, color: T.green }}>Inversión: {fmt(totalInv)}</span>
+                                    </div>
+                                  </div>
+                                </div>
+
+                                {costoSinM > totalInv && (
+                                  <div style={{ padding: "10px 14px", background: T.greenLight, borderRadius: 6, display: "flex", justifyContent: "space-between", alignItems: "center", border: `2px solid ${T.green}` }}>
+                                    <div>
+                                      <div style={{ fontSize: 12, fontWeight: 800, color: T.green }}>Beneficio neto: {fmt(costoSinM - totalInv)} en 12 meses</div>
+                                      <div style={{ fontSize: 10, color: T.textSecondary }}>Proteges tu cartera, vendes más a crédito y eliminas costos operativos</div>
+                                    </div>
+                                    <div style={{ fontSize: 20, fontWeight: 800, color: T.green }}>{Math.round(costoSinM / Math.max(totalInv, 1))}x</div>
+                                  </div>
+                                )}
+                                </div>{/* close pdf-section */}
+                              </div>
+                            );
+                          })()}
+
+                          {/* Footer */}
+                          <div style={{ borderTop: `1px solid ${T.border}`, paddingTop: 10, marginTop: 16, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                            <div style={{ fontSize: 10, color: T.textMuted }}>Mango / Tecnologías Morales Angelini S.A.P.I. de C.V.</div>
+                            <div style={{ fontSize: 10, color: T.textMuted }}>Resumen generado el {fechaHoy}</div>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Sticky bottom action bar */}
+                      <div style={{ padding: "14px 32px", background: T.surface, borderTop: `1px solid ${T.border}`, flexShrink: 0 }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                          <button onClick={() => setPropuestaStep("form")}
+                            style={{ padding: "10px 20px", background: T.bg, color: T.textSecondary, border: `1px solid ${T.border}`, borderRadius: T.radiusButton, fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>
+                            Volver
+                          </button>
+                          <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
+                            {/* Doc checkboxes */}
+                            <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+                              <label style={{ display: "flex", alignItems: "center", gap: 5, cursor: "pointer", fontSize: 12, color: T.text, fontWeight: 500 }}>
+                                <input type="checkbox" checked={pdfPropuesta} onChange={e => setPdfPropuesta(e.target.checked)} style={{ accentColor: T.primary, width: 15, height: 15 }} />
+                                Propuesta
+                              </label>
+                              <label style={{ display: "flex", alignItems: "center", gap: 5, cursor: "pointer", fontSize: 12, color: T.text, fontWeight: 500 }}>
+                                <input type="checkbox" checked={pdfBrochure} onChange={e => setPdfBrochure(e.target.checked)} style={{ accentColor: T.primary, width: 15, height: 15 }} />
+                                Brochure
+                              </label>
+                            </div>
+                            <button disabled={!pdfPropuesta && !pdfBrochure} onClick={() => {
+                              const ids = [];
+                              if (pdfPropuesta) ids.push("propuesta-pdf");
+                              if (pdfBrochure) ids.push("brochure-pdf");
+                              const name = pdfPropuesta && pdfBrochure
+                                ? `Mango – ${propuestaData.empresa}.pdf`
+                                : pdfPropuesta
+                                  ? `Propuesta Comercial ${propuestaData.empresa}.pdf`
+                                  : `Resumen Ejecutivo ${propuestaData.empresa}.pdf`;
+                              downloadPDF(ids, name);
+                            }}
+                              style={{ padding: "10px 18px", background: (!pdfPropuesta && !pdfBrochure) ? T.border : T.bg, color: (!pdfPropuesta && !pdfBrochure) ? T.textMuted : T.dark, border: `1px solid ${T.border}`, borderRadius: T.radiusButton, fontSize: 12, fontWeight: 600, cursor: (!pdfPropuesta && !pdfBrochure) ? "not-allowed" : "pointer", fontFamily: "inherit", display: "flex", alignItems: "center", gap: 6 }}>
+                              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                              Descargar PDF
+                            </button>
+                            <button onClick={handleGmail}
+                              style={{ padding: "12px 24px", background: T.primary, color: T.dark, border: "none", borderRadius: T.radiusButton, fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", boxShadow: "0 2px 8px rgba(255,206,0,0.3)", display: "flex", alignItems: "center", gap: 8 }}>
+                              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
+                              Enviar por Gmail
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* === STEP: SENT === */}
+                  {propuestaStep === "sent" && (
+                    <div style={{ padding: "48px 32px", textAlign: "center" }}>
+                      <div style={{ width: 64, height: 64, borderRadius: 32, background: T.greenLight, display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 20px", border: `2px solid ${T.green}` }}>
+                        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke={T.green} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                      </div>
+                      <div style={{ fontSize: 22, fontWeight: 800, color: T.dark, marginBottom: 8 }}>Gmail abierto</div>
+                      <div style={{ fontSize: 14, color: T.textSecondary, marginBottom: 6 }}>Se abrió Gmail con la propuesta para <strong>{propuestaData.email}</strong>.</div>
+                      <div style={{ fontSize: 13, color: T.textMuted, marginBottom: 20 }}>No olvides adjuntar los PDFs descargados antes de enviar.</div>
+                      <div style={{ display: "flex", gap: 10, justifyContent: "center", alignItems: "center", marginBottom: 28 }}>
+                        <label style={{ display: "flex", alignItems: "center", gap: 5, cursor: "pointer", fontSize: 12, color: T.text, fontWeight: 500 }}>
+                          <input type="checkbox" checked={pdfPropuesta} onChange={e => setPdfPropuesta(e.target.checked)} style={{ accentColor: T.primary, width: 15, height: 15 }} />
+                          Propuesta
+                        </label>
+                        <label style={{ display: "flex", alignItems: "center", gap: 5, cursor: "pointer", fontSize: 12, color: T.text, fontWeight: 500 }}>
+                          <input type="checkbox" checked={pdfBrochure} onChange={e => setPdfBrochure(e.target.checked)} style={{ accentColor: T.primary, width: 15, height: 15 }} />
+                          Brochure
+                        </label>
+                        <button disabled={!pdfPropuesta && !pdfBrochure} onClick={() => {
+                          const ids = [];
+                          if (pdfPropuesta) ids.push("propuesta-pdf");
+                          if (pdfBrochure) ids.push("brochure-pdf");
+                          const name = pdfPropuesta && pdfBrochure
+                            ? `Mango – ${propuestaData.empresa}.pdf`
+                            : pdfPropuesta
+                              ? `Propuesta Comercial ${propuestaData.empresa}.pdf`
+                              : `Resumen Ejecutivo ${propuestaData.empresa}.pdf`;
+                          downloadPDF(ids, name);
+                        }}
+                          style={{ padding: "10px 18px", background: (!pdfPropuesta && !pdfBrochure) ? T.border : T.bg, color: (!pdfPropuesta && !pdfBrochure) ? T.textMuted : T.dark, border: `1px solid ${T.border}`, borderRadius: T.radiusButton, fontSize: 12, fontWeight: 600, cursor: (!pdfPropuesta && !pdfBrochure) ? "not-allowed" : "pointer", fontFamily: "inherit", display: "flex", alignItems: "center", gap: 6 }}>
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                          Descargar PDF
+                        </button>
+                      </div>
+                      <button onClick={() => { setShowPropuesta(false); setPropuestaStep("form"); }}
+                        style={{ padding: "12px 32px", background: T.primary, color: T.dark, border: "none", borderRadius: T.radiusButton, fontSize: 14, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>
+                        Cerrar
+                      </button>
+                    </div>
+                  )}
+
+                </div>
+              </div>
+            );
+          })()}
+        </div>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById("root")).render(<PricingModel />);
+  </script>
+</body>
+</html>
